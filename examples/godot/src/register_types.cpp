@@ -1,6 +1,6 @@
 #include "register_types.h"
 
-#include "cam_nav_demo_node.hpp"
+#include "cam_nav_demo_node.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/defs.hpp>

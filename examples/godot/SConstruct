@@ -18,14 +18,14 @@ sources = Glob("src/*.cpp")
 
 if env["platform"] == "macos":
     library = env.SharedLibrary(
-        "scene/bin/libcamnav.{}.{}.framework/libcamnav.{}.{}".format(
+        "cam_nav_demo/bin/libcamnav.{}.{}.framework/libcamnav.{}.{}".format(
             env["platform"], env["target"], env["platform"], env["target"]
         ),
         source=sources,
     )
 else:
     library = env.SharedLibrary(
-        "scene/bin/libcamnav{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+        "cam_nav_demo/bin/libcamnav{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
         source=sources,
     )
 

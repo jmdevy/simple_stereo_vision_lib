@@ -2,4 +2,7 @@
 
 [node name="Node3D" type="Node3D"]
 
+[node name="CSGBox3D" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -3.71675)
+
 [node name="CamNavDemoNode" type="CamNavDemoNode" parent="."]

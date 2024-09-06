@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 
 // On some platforms, it is required to store large buffers
@@ -22,7 +23,7 @@
 
 
 // Used throughout library to refer to which camera to interact with
-typedef enum cam_nav_camera_side_enum {CAN_NAV_LEFT_CAMERA=0, CAN_NAV_RIGHT_CAMERA=1} cam_nav_camera_side;
+typedef enum cam_nav_camera_side_enum {CAM_NAV_LEFT_CAMERA=0, CAM_NAV_RIGHT_CAMERA=1} cam_nav_camera_side;
 
 // Stateful library, library creates an instance of this
 // for the user to store in a void* pointer (user should
@@ -31,11 +32,14 @@ typedef enum cam_nav_camera_side_enum {CAN_NAV_LEFT_CAMERA=0, CAN_NAV_RIGHT_CAME
 // https://stackoverflow.com/a/78291179
 typedef struct cam_nav_t{
     uint32_t pixel_count;                       // Number of pixels in an individual camera
+    uint32_t frame_buffer_size;                 // Size, in bytes, of individual frame buffers
+    uint32_t depth_buffer_size;                 // Size, in bytes, of the depth buffer
+
     uint16_t frame_buffers[2];                  // Frame buffers where raw 16-bit RGB565 frames are stored
-    uint32_t frame_buffer_size_bytes;           // Size of an individual frame buffer based on `pixel_count` and bytes per pixel
-    uint32_t frame_buffers_filled_amounts[2];   // When using `cam_nav_feed(...)`, tracks how much information is stored in corresponding `frame_buffers[...]`
     float *depth_buffer;                        // Depth buffer where calculated depths from disparity map are stored
-    uint32_t depth_buffer_size_bytes;           // Size of an depth buffer based on `pixel_count` and bytes per sample
+
+    uint32_t frame_buffers_amounts[2];          // When using `cam_nav_feed(...)`, tracks how much information is stored in corresponding `frame_buffers[...]`
+
     bool buffers_set;                           // Flag indicating if frame and depth buffers are allocated/set
     bool custom_buffers_set;                    // Flag indicating if frame and depth buffers are memory from outside the library (do not deallocate custom buffers, user's problem)
 }cam_nav_t;
@@ -53,16 +57,14 @@ typedef struct cam_nav_t{
 //
 // Set `allocate` to `true` if the library should allocate frame and depth buffers, otherwise, set
 // false if you're going to call `cam_nav_set_buffers` to reuse memory you may already have allocated
-void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, bool allocate){
+inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, bool allocate){
     // Create the library instance for the user to store and re-use
     cam_nav_t *cam_nav = CAM_NAV_MALLOC(sizeof(cam_nav_t));
 
     // Calculate number of pixels and elements in frame and depth buffers
     cam_nav->pixel_count = cameras_width*cameras_height;
-
-    // Calculate number of bytes to allocate for each buffer type
-    cam_nav->frame_buffer_size_bytes = cam_nav->pixel_count * sizeof(uint16_t);
-    cam_nav->depth_buffer_size_bytes = cam_nav->pixel_count * sizeof(float);
+    cam_nav->frame_buffer_size = cam_nav->pixel_count * sizeof(uint16_t);
+    cam_nav->depth_buffer_size = cam_nav->pixel_count * sizeof(float);
 
     // Stop here if user does not want cam_nav to make buffers
     if(allocate == false){
@@ -70,11 +72,11 @@ void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, bool alloc
     }
 
     // Allocate space for the individual camera frame buffers
-    cam_nav->frame_buffers[0] = CAM_NAV_MALLOC(cam_nav->frame_buffer_size_bytes);
-    cam_nav->frame_buffers[1] = CAM_NAV_MALLOC(cam_nav->frame_buffer_size_bytes);
+    cam_nav->frame_buffers[0] = CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
+    cam_nav->frame_buffers[1] = CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
 
     // Allocate space for the depth buffer
-    cam_nav->depth_buffer = CAM_NAV_MALLOC(cam_nav->depth_buffer_size_bytes);
+    cam_nav->depth_buffer = CAM_NAV_MALLOC(cam_nav->depth_buffer_size);
     
     // Indicate that the buffers are ready
     // and that these are *not* custom buffers
@@ -89,7 +91,7 @@ void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, bool alloc
 // If `allocate` was set to `false` in call to `cam_nav_create`, use this function
 // to set the 2 frame buffers and 1 depth buffer to custom locations. Returns true
 // if set locations successfully, false if not because element count < pixel_count
-bool cam_nav_set_buffers(cam_nav_t *cam_nav, uint16_t *frame_buffers[], uint32_t frame_buffers_lengths, float *depth_buffer, uint32_t depth_buffer_length){
+inline bool cam_nav_set_buffers(cam_nav_t *cam_nav, uint16_t *frame_buffers[], uint32_t frame_buffers_lengths, float *depth_buffer, uint32_t depth_buffer_length){
     // Check that the buffers are long enough to store information for every camera pixel
     if(frame_buffers_lengths < cam_nav->pixel_count || depth_buffer_length < cam_nav->pixel_count){
         return false;
@@ -107,7 +109,7 @@ bool cam_nav_set_buffers(cam_nav_t *cam_nav, uint16_t *frame_buffers[], uint32_t
 
 
 // Give back the memory for various buffers
-void cam_nav_destroy(cam_nav_t *cam_nav){
+inline void cam_nav_destroy(cam_nav_t *cam_nav){
     // Only deallocate buffers if they are set and not custom
     if(cam_nav->buffers_set == true && cam_nav->custom_buffers_set == false){
         CAM_NAV_FREE(cam_nav->frame_buffers[0]);
@@ -130,6 +132,33 @@ void cam_nav_destroy(cam_nav_t *cam_nav){
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
 
+inline bool cam_nav_hog(cam_nav_t *cam_nav){
+
+}
+
+
+// https://johnwlambert.github.io/stereo/
+inline bool cam_nav_depth(cam_nav_t *cam_nav){
+
+}
+
+
+// https://johnwlambert.github.io/stereo/
+inline bool cam_nav_disparity(cam_nav_t *cam_nav){
+
+}
+
+
+// Left and right camera buffers are full, process them
+inline bool cam_nav_process(cam_nav_t *cam_nav){
+    // Reset these for next incoming frames after processing
+    cam_nav->frame_buffers_amounts[CAM_NAV_LEFT_CAMERA] = 0;
+    cam_nav->frame_buffers_amounts[CAM_NAV_RIGHT_CAMERA] = 0;
+
+
+}
+
+
 // Copies the incoming `buffer` to internal library frame buffer.
 // Returns `true` when:
 //  * Fed a buffer chunk but still haven't been provided enough buffers yet to complete the frame
@@ -138,22 +167,26 @@ void cam_nav_destroy(cam_nav_t *cam_nav){
 //  * Fed a buffer chunk but the addition of this buffer resulted in too much data needed to complete the frame
 //    (User is expected to crop their buffers or incoming `buffer_len`s so as to understand the information they
 //     are putting into the library)
-bool cam_nav_feed(cam_nav_t *cam_nav, cam_nav_camera_side side, uint16_t *buffer, uint32_t buffer_len){
+inline bool cam_nav_feed(cam_nav_t *cam_nav, cam_nav_camera_side side, uint16_t *buffer, uint32_t buffer_length){
     // Add the additional buffer amount to the count/amount
-    cam_nav->frame_buffers_filled_amounts[side] += buffer_len;
+    cam_nav->frame_buffers_amounts[side] += buffer_length;
 
-    // In bytes, check that the addition of the incoming buffer doesn't
-    // overflow the frame buffer, if it does, reset amount count
-    if(cam_nav->frame_buffers_filled_amounts[side] > cam_nav->frame_buffer_size_bytes){
-        cam_nav->frame_buffers_filled_amounts[side] = 0;
+    // Check, in bytes, for buffer overflow, reset and return error if true
+    if(cam_nav->frame_buffers_amounts[side] > cam_nav->frame_buffer_size){
+        cam_nav->frame_buffers_amounts[side] = 0;
         return false;
     }
 
-
+    // Do the copy to internal fraem buffer
+    memcpy(cam_nav->frame_buffers[side], buffer, buffer_length);
     
-    if(cam_nav->frame_buffers_filled_amounts[side] == cam_nav->frame_buffer_size_bytes){
-
+    // Process frames if both buffers are full
+    if(cam_nav->frame_buffers_amounts[CAM_NAV_LEFT_CAMERA] == cam_nav->frame_buffer_size &&
+       cam_nav->frame_buffers_amounts[CAM_NAV_RIGHT_CAMERA] == cam_nav->frame_buffer_size){
+        cam_nav_process(cam_nav);
     }
+
+    return true;
 }
 
 
