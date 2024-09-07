@@ -35,7 +35,7 @@ typedef struct cam_nav_t{
     uint32_t frame_buffer_size;                 // Size, in bytes, of individual frame buffers
     uint32_t depth_buffer_size;                 // Size, in bytes, of the depth buffer
 
-    uint16_t frame_buffers[2];                  // Frame buffers where raw 16-bit RGB565 frames are stored
+    uint16_t *frame_buffers[2];                 // Frame buffers where raw 16-bit RGB565 frames are stored
     float *depth_buffer;                        // Depth buffer where calculated depths from disparity map are stored
 
     uint32_t frame_buffers_amounts[2];          // When using `cam_nav_feed(...)`, tracks how much information is stored in corresponding `frame_buffers[...]`
@@ -59,7 +59,7 @@ typedef struct cam_nav_t{
 // false if you're going to call `cam_nav_set_buffers` to reuse memory you may already have allocated
 inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, bool allocate){
     // Create the library instance for the user to store and re-use
-    cam_nav_t *cam_nav = CAM_NAV_MALLOC(sizeof(cam_nav_t));
+    cam_nav_t *cam_nav = (cam_nav_t*)CAM_NAV_MALLOC(sizeof(cam_nav_t));
 
     // Calculate number of pixels and elements in frame and depth buffers
     cam_nav->pixel_count = cameras_width*cameras_height;
@@ -72,11 +72,11 @@ inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, boo
     }
 
     // Allocate space for the individual camera frame buffers
-    cam_nav->frame_buffers[0] = CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
-    cam_nav->frame_buffers[1] = CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
+    cam_nav->frame_buffers[0] = (uint16_t*)CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
+    cam_nav->frame_buffers[1] = (uint16_t*)CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
 
     // Allocate space for the depth buffer
-    cam_nav->depth_buffer = CAM_NAV_MALLOC(cam_nav->depth_buffer_size);
+    cam_nav->depth_buffer = (float*)CAM_NAV_MALLOC(cam_nav->depth_buffer_size);
     
     // Indicate that the buffers are ready
     // and that these are *not* custom buffers

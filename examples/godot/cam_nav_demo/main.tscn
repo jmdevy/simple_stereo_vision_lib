@@ -1,8 +1,21 @@
-[gd_scene format=3 uid="uid://drhnu8mt1di0m"]
+[gd_scene load_steps=2 format=3 uid="uid://drhnu8mt1di0m"]
+
+[sub_resource type="Environment" id="Environment_6nhf0"]
 
 [node name="Node3D" type="Node3D"]
 
 [node name="CSGBox3D" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -3.71675)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.287781, -0.770708, 0.183862)
+size = Vector3(23.2529, 1, 23.0198)
 
 [node name="CamNavDemoNode" type="CamNavDemoNode" parent="."]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_6nhf0")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.558411, 0.829564, 0, -0.829564, 0.558411, 0, 3.10012, 3.23827)
+shadow_enabled = true
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6842, 0)
