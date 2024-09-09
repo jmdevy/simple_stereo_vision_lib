@@ -25,12 +25,43 @@
 // Used throughout library to refer to which camera to interact with
 typedef enum cam_nav_camera_side_enum {CAM_NAV_LEFT_CAMERA=0, CAM_NAV_RIGHT_CAMERA=1} cam_nav_camera_side;
 
+// Various types of errors set in library instance `.error`
+typedef enum cam_nav_status_codes_enum {CAM_NAV_STATUS_OK=0, CAM_NAV_STATUS_FEED_OVERFLOW=1} cam_nav_return_codes;
+
+// Just name `uint8_t` to status for tracking library errors in instance
+typedef uint8_t can_nav_status_t;
+
+
 // Stateful library, library creates an instance of this
 // for the user to store in a void* pointer (user should
 // not be aware of the internal state or manipulate it
 // directly)
 // https://stackoverflow.com/a/78291179
 typedef struct cam_nav_t{
+    uint16_t width;                             // Width resolution of camera
+    uint16_t height;                            // height resolution of camera
+
+    float baseline_mm;                          // Distance between cameras on same plane in mm
+    float focal_length_mm;                      // Focal length (distance between sensor and lens) in mm
+
+    // Called internally by `cam_nav_process`
+    // for each window for comparing pixel
+    // blocks on the 1D search line for each
+    // eye. Defaults to `SAD` but can be
+    // replaced by any algorithm that returns
+    // a float where higher values represent
+    // a higher similarity between the pixels
+    // in the passed window location and
+    // dimensions in the original and compare
+    // buffers
+    float (*aggregate_pixel_comparer)(cam_nav_t *cam_nav,
+                                      uint16_t *original_cam_buffer,
+                                      uint16_t *compare_cam_buffer,
+                                      uint32_t buffer_stride,
+                                      uint16_t window_x,
+                                      uint16_t window_y,
+                                      uint8_t window_dimensions);
+
     uint32_t pixel_count;                       // Number of pixels in an individual camera
     uint32_t frame_buffer_size;                 // Size, in bytes, of individual frame buffers
     uint32_t depth_buffer_size;                 // Size, in bytes, of the depth buffer
@@ -40,16 +71,43 @@ typedef struct cam_nav_t{
 
     uint32_t frame_buffers_amounts[2];          // When using `cam_nav_feed(...)`, tracks how much information is stored in corresponding `frame_buffers[...]`
 
+    uint8_t search_window_dimensions;           // When looking for similar pixel blocks, this is the size of the blocks used for comparing. Must be a multiple of
+
     bool buffers_set;                           // Flag indicating if frame and depth buffers are allocated/set
     bool custom_buffers_set;                    // Flag indicating if frame and depth buffers are memory from outside the library (do not deallocate custom buffers, user's problem)
+
+    can_nav_status_t status_code;               // OK by default since 0 by default but gets set to any error code throughout the library
 }cam_nav_t;
 
 
 
 // ///////////////////////////////////////////
-//         LIBRARY SETUP AND STOPPING
+//         LIBRARY STATUS AND ERROR
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
+// Used internally to set library status when a error occurs
+inline void cam_nav_set_status_code(cam_nav_t *cam_nav, can_nav_status_t status_code){
+    cam_nav->status_code = status_code;
+}
+
+
+inline can_nav_status_t cam_nav_get_status_code(cam_nav_t *cam_nav){
+    return cam_nav->status_code;
+}
+
+
+// ///////////////////////////////////////////
+//   AGGREGATE PIXEL BLOCK COMPARE FUNCTIONS
+// vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+
+float cam_nav_sad_comparer(cam_nav_t *cam_nav, uint16_t *original_cam_buffer, uint16_t *compare_cam_buffer, uint32_t buffer_stride, uint16_t window_x, uint16_t window_y, uint8_t window_dimensions){
+    
+}
+
+
+// ///////////////////////////////////////////
+//         LIBRARY SETUP AND STOPPING
+// vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
 // Create and initialize the `cam_nav` library - store the returned pointer in your program. Allocates:
 //  * 2 16-bit cameras_width*cameras_height frame buffers = 2*2*cameras_width*cameras_height bytes
@@ -57,9 +115,27 @@ typedef struct cam_nav_t{
 //
 // Set `allocate` to `true` if the library should allocate frame and depth buffers, otherwise, set
 // false if you're going to call `cam_nav_set_buffers` to reuse memory you may already have allocated
-inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, bool allocate){
+inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, uint8_t search_window_dimensions, float baseline_mm, float focal_length_mm, bool allocate){
     // Create the library instance for the user to store and re-use
     cam_nav_t *cam_nav = (cam_nav_t*)CAM_NAV_MALLOC(sizeof(cam_nav_t));
+
+    // if search window square dimensions are not a multiple of the
+    // width or height, return NULL and do not create library instance
+    if(cameras_width & search_window_dimensions != 0 || cameras_height % search_window_dimensions != 0){
+        return NULL;
+    }
+
+    // Track these for later usage
+    cam_nav->width = cameras_width;
+    cam_nav->height = cameras_height;
+    cam_nav->search_window_dimensions = search_window_dimensions;
+    cam_nav->baseline_mm == baseline_mm;
+    cam_nav->focal_length_mm == focal_length_mm;
+
+    // Set the default algorithm that compares pixel
+    // blocks on 1D search line between left and right
+    // camera eyes
+    cam_nav->aggregate_pixel_comparer = cam_nav_sad_comparer;
 
     // Calculate number of pixels and elements in frame and depth buffers
     cam_nav->pixel_count = cameras_width*cameras_height;
@@ -126,11 +202,9 @@ inline void cam_nav_destroy(cam_nav_t *cam_nav){
 }
 
 
-
 // ///////////////////////////////////////////
 //          PRIMARY LIBRARY USAGE
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-
 
 inline bool cam_nav_hog(cam_nav_t *cam_nav){
 
@@ -155,7 +229,7 @@ inline bool cam_nav_process(cam_nav_t *cam_nav){
     cam_nav->frame_buffers_amounts[CAM_NAV_LEFT_CAMERA] = 0;
     cam_nav->frame_buffers_amounts[CAM_NAV_RIGHT_CAMERA] = 0;
 
-
+    return true;
 }
 
 
@@ -167,23 +241,26 @@ inline bool cam_nav_process(cam_nav_t *cam_nav){
 //  * Fed a buffer chunk but the addition of this buffer resulted in too much data needed to complete the frame
 //    (User is expected to crop their buffers or incoming `buffer_len`s so as to understand the information they
 //     are putting into the library)
-inline bool cam_nav_feed(cam_nav_t *cam_nav, cam_nav_camera_side side, uint16_t *buffer, uint32_t buffer_length){
+inline bool cam_nav_feed(void *cam_nav_instance, cam_nav_camera_side side, const uint8_t *buffer_u8, uint32_t buffer_length_u8){
+    cam_nav_t *cam_nav = (cam_nav_t*)cam_nav_instance;
+
     // Add the additional buffer amount to the count/amount
-    cam_nav->frame_buffers_amounts[side] += buffer_length;
+    cam_nav->frame_buffers_amounts[side] += buffer_length_u8;
 
     // Check, in bytes, for buffer overflow, reset and return error if true
     if(cam_nav->frame_buffers_amounts[side] > cam_nav->frame_buffer_size){
         cam_nav->frame_buffers_amounts[side] = 0;
+        cam_nav_set_status_code(cam_nav, CAM_NAV_STATUS_FEED_OVERFLOW);
         return false;
     }
 
-    // Do the copy to internal fraem buffer
-    memcpy(cam_nav->frame_buffers[side], buffer, buffer_length);
+    // Do the copy to the internal frame buffer
+    memcpy(cam_nav->frame_buffers[side], buffer_u8, buffer_length_u8);
     
     // Process frames if both buffers are full
     if(cam_nav->frame_buffers_amounts[CAM_NAV_LEFT_CAMERA] == cam_nav->frame_buffer_size &&
        cam_nav->frame_buffers_amounts[CAM_NAV_RIGHT_CAMERA] == cam_nav->frame_buffer_size){
-        cam_nav_process(cam_nav);
+        return cam_nav_process(cam_nav);
     }
 
     return true;

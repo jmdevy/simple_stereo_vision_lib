@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
+#define CAMERA_RESOLUTION 256
 
 using namespace godot;
 
@@ -51,13 +52,16 @@ void CamNavDemoNode::_ready(){
 	right_viewport_container->call_deferred("add_child", right_viewport);
 
 	// Set the render resolution of the view ports
-	left_viewport->set_size(Vector2(256, 256));
-	right_viewport->set_size(Vector2(256, 256));
+	left_viewport->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
+	right_viewport->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
 
 	// Adjust visible view ports in window without modifying actual render resolution
-	left_viewport_container->set_scale(Vector2(2, 2));
-	right_viewport_container->set_scale(Vector2(2, 2));
+	// Ensure view ports are always 512x512 on the monitor
+	float scale = 512/left_viewport->get_size().x;
+	left_viewport_container->set_scale(Vector2(scale, scale));
+	right_viewport_container->set_scale(Vector2(scale, scale));
 
+	// Move right viewport to the right of the left eye
 	right_viewport_container->set_position(Vector2(left_viewport->get_size().x * left_viewport_container->get_scale().x, 0));
 
 	UtilityFunctions::print("Viewport sizes:");
@@ -81,7 +85,11 @@ void CamNavDemoNode::_ready(){
 	right_texture = right_viewport->get_texture();
 
 	// Create the cam_nav library instance
-	cam_nav = cam_nav_create(128, 128, true);
+	cam_nav = cam_nav_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, 4, true);
+
+	if(cam_nav == NULL){
+		UtilityFunctions::print("ERROR: Could not create cam_nav library! Likely an issue with search window not being a multiple of the width or height of the camera!");
+	}
 }
 
 
@@ -104,6 +112,14 @@ void CamNavDemoNode::_process(float delta){
 
 	PackedByteArray left_byte_array = left_image.ptr()->get_data();
 	PackedByteArray right_byte_array = right_image.ptr()->get_data();
+
+	if(cam_nav_feed(cam_nav, CAM_NAV_LEFT_CAMERA, left_byte_array.ptr(), left_byte_array.size()) == false){
+		UtilityFunctions::print("ERROR: Too much data for left cam_nav eye!");
+	}
+
+	if(cam_nav_feed(cam_nav, CAM_NAV_RIGHT_CAMERA, right_byte_array.ptr(), right_byte_array.size()) == false){
+		UtilityFunctions::print("ERROR: Too much data for right cam_nav eye!");
+	}
 }
 
 
