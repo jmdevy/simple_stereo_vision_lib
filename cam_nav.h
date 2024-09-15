@@ -91,6 +91,9 @@ typedef struct cam_nav_t{
     void *disparity_opaque_ptr;
     void (*on_disparity_cb)(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t disparity_width, uint16_t disparity_height);
 
+    void *depth_opaque_ptr;
+    void (*on_depth_cb)(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height);
+
     can_nav_status_t status_code;               // OK by default since 0 by default but gets set to any error code throughout the library
 }cam_nav_t;
 
@@ -169,6 +172,9 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
     cam_nav->disparity_opaque_ptr = NULL;
     cam_nav->on_disparity_cb = NULL;
 
+    cam_nav->depth_opaque_ptr = NULL;
+    cam_nav->on_depth_cb = NULL;
+
     // Depth resolution is only as good as the search window
     cam_nav->depth_width = cam_nav->width / cam_nav->search_window_dimensions;
     cam_nav->depth_height = cam_nav->height / cam_nav->search_window_dimensions;
@@ -242,6 +248,14 @@ inline void cam_nav_set_on_disparity_cb(cam_nav_t *cam_nav,
 }
 
 
+inline void cam_nav_set_on_depth_cb(cam_nav_t *cam_nav,
+                                    void (*on_depth_cb)(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height),
+                                    void *depth_opaque_ptr){
+    cam_nav->on_depth_cb = on_depth_cb;
+    cam_nav->depth_opaque_ptr = depth_opaque_ptr;
+}
+
+
 // Give back the memory for various buffers
 inline void cam_nav_destroy(cam_nav_t *cam_nav){
     // Only deallocate buffers if they are set and not custom
@@ -306,7 +320,7 @@ inline void cam_nav_convert_rgb656_to_grayscale(uint16_t *buffer, uint32_t pixel
 }
 
 
-inline uint16_t cam_nav_search_right_eye_line(cam_nav_t *cam_nav, uint16_t left_cell_x, uint16_t left_cell_y){
+inline uint16_t cam_nav_disparity_search(cam_nav_t *cam_nav, uint16_t left_cell_x, uint16_t left_cell_y){
     // Starting from same location in right eye, move left in right
     // eye by a search window amount each time until reach end then
     // calculate difference in x (disparity) for most similar block's
@@ -339,6 +353,18 @@ inline uint16_t cam_nav_search_right_eye_line(cam_nav_t *cam_nav, uint16_t left_
 }
 
 
+inline void cam_nav_calculate_depth(cam_nav_t *cam_nav){
+    for(int32_t y=0; y<cam_nav->depth_height; y++){
+        for(int32_t x=0; x<cam_nav->depth_width; x++){
+
+            float disparity = cam_nav->depth_buffer[y*cam_nav->depth_width + x];
+            cam_nav->depth_buffer[y*cam_nav->depth_width + x] = cam_nav->focal_length_mm * (cam_nav->baseline_mm / disparity);
+
+        }
+    }
+}
+
+
 // Left and right camera buffers are full, process them
 inline bool cam_nav_process(cam_nav_t *cam_nav){
     // We have both frames from both cameras, need to go through
@@ -361,13 +387,17 @@ inline bool cam_nav_process(cam_nav_t *cam_nav){
     for(int32_t left_cell_y=0; left_cell_y<cam_nav->depth_height; left_cell_y++){
         for(int32_t left_cell_x=0; left_cell_x<cam_nav->depth_width; left_cell_x++){
 
-            uint16_t disparity = cam_nav_search_right_eye_line(cam_nav, left_cell_x, left_cell_y);\
+            uint16_t disparity = cam_nav_disparity_search(cam_nav, left_cell_x, left_cell_y);
             cam_nav->depth_buffer[left_cell_y*cam_nav->depth_width + left_cell_x] = (float)disparity;
 
         }
     }
 
     if(cam_nav->on_disparity_cb != NULL) cam_nav->on_disparity_cb(cam_nav->disparity_opaque_ptr, cam_nav->depth_buffer, cam_nav->depth_width, cam_nav->depth_height);
+
+    cam_nav_calculate_depth(cam_nav);
+
+    if(cam_nav->on_depth_cb != NULL) cam_nav->on_depth_cb(cam_nav->depth_opaque_ptr, cam_nav->depth_buffer, cam_nav->depth_width, cam_nav->depth_height);
 
     return true;
 }

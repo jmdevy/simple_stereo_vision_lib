@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/sub_viewport_container.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/classes/camera_attributes_physical.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
@@ -30,6 +31,7 @@ private:
     SubViewportContainer        *left_viewport_container = nullptr;
     SubViewport                 *left_viewport = nullptr;
     Camera3D                    *left_camera = nullptr;
+    godot::Ref<CameraAttributesPhysical> left_camera_physical_attribute;
     godot::Ref<ViewportTexture> left_texture;
     Node3D *left_origin;
 	Node3D *left_rotation_origin;
@@ -37,6 +39,7 @@ private:
     SubViewportContainer        *right_viewport_container = nullptr;
     SubViewport                 *right_viewport = nullptr;
     Camera3D                    *right_camera = nullptr;
+    godot::Ref<CameraAttributesPhysical> right_camera_physical_attribute;
     godot::Ref<ViewportTexture> right_texture;
     Node3D *right_origin;
 	Node3D *right_rotation_origin;
@@ -69,8 +72,15 @@ public:
     godot::Ref<ImageTexture>    disparity_texture;
     godot::Ref<Image>           disparity_image;
 
+    SubViewportContainer        *depth_viewport_container = nullptr;
+    SubViewport                 *depth_viewport = nullptr;
+    Camera2D                    *depth_camera = nullptr;
+    TextureRect                 *depth_texture_rect;
+    godot::Ref<ImageTexture>    depth_texture;
+    godot::Ref<Image>           depth_image;
+
     // How many units apart are the stereo eye origins
-    float baseline = 1.0f;
+    float baseline = 2.0f;
 
     void _ready();
 	void _process(float delta);

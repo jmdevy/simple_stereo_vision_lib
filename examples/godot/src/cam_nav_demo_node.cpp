@@ -59,13 +59,36 @@ void on_disparity(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t 
 	// pixel using that since output texture is 8-bit
 	for(uint16_t y=0; y<disparity_width; y++){
 		for(uint16_t x=0; x<disparity_height; x++){
-			float magnitude = (float)disparity_buffer[y*disparity_width + x] / (float)CAMERA_RESOLUTION;
+			float magnitude = ((float)disparity_buffer[y*disparity_width + x] / (float)CAMERA_RESOLUTION);
 			disparity_image.ptr()->set_pixel(x, y, Color(magnitude, magnitude, magnitude));
 		}
 	}
 
 	// Update the image to show it on screen
 	disparity_texture.ptr()->set_image(disparity_image);
+}
+
+
+void on_depth(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height){
+	// Get the class instance back and make reference variables for
+	// texture and image for this side
+	CamNavDemoNode *instance = (CamNavDemoNode*)depth_opaque_ptr;
+	godot::Ref<ImageTexture>    depth_texture = instance->depth_texture;
+    godot::Ref<Image>           depth_image = instance->depth_image;
+
+	// For each incoming grayscale single component value
+	// from `cam_nav`, get it and convert it from 16-bit
+	// int luminance to 0.0 ~ 1.0 luminance and then set
+	// pixel using that since output texture is 8-bit
+	for(uint16_t y=0; y<depth_width; y++){
+		for(uint16_t x=0; x<depth_height; x++){
+			float magnitude = (float)depth_buffer[y*depth_width + x];
+			depth_image.ptr()->set_pixel(x, y, Color(magnitude, magnitude, magnitude));
+		}
+	}
+
+	// Update the image to show it on screen
+	depth_texture.ptr()->set_image(depth_image);
 }
 
 
@@ -95,12 +118,16 @@ void CamNavDemoNode::_ready(){
 	left_camera 			= memnew(Camera3D);
 	left_origin				= memnew(Node3D);
 	left_rotation_origin    = memnew(Node3D);
+	left_camera_physical_attribute.instantiate();
+	left_camera->set_attributes(left_camera_physical_attribute);
 
 	right_viewport_container = memnew(SubViewportContainer);
 	right_viewport 			 = memnew(SubViewport);
 	right_camera 			 = memnew(Camera3D);
 	right_origin			 = memnew(Node3D);
 	right_rotation_origin	 = memnew(Node3D);
+	right_camera_physical_attribute.instantiate();
+	right_camera->set_attributes(left_camera_physical_attribute);
 
 	// Add hierarchy of both eyes
 	call_deferred("add_child", left_viewport_container);
@@ -163,42 +190,58 @@ void CamNavDemoNode::_ready(){
 	disparity_texture.instantiate();
 	disparity_texture_rect->set_texture_filter(godot::CanvasItem::TextureFilter::TEXTURE_FILTER_NEAREST);
 
+	depth_viewport_container = memnew(SubViewportContainer);
+	depth_viewport = memnew(SubViewport);
+	depth_camera = memnew(Camera2D);
+	depth_texture_rect = memnew(TextureRect);
+	depth_texture.instantiate();
+	depth_texture_rect->set_texture_filter(godot::CanvasItem::TextureFilter::TEXTURE_FILTER_NEAREST);
+
 	scale *= (float)SEARCH_WINDOW_DIMENSIONS;
 	disparity_viewport_container->set_scale(Vector2(scale, scale));
+	depth_viewport_container->set_scale(Vector2(scale, scale));
 
 	Node3D *parent = get_parent_node_3d();
 
 	parent->call_deferred("add_child", left_grayscale_viewport_container);
 	parent->call_deferred("add_child", right_grayscale_viewport_container);
 	parent->call_deferred("add_child", disparity_viewport_container);
+	parent->call_deferred("add_child", depth_viewport_container);
 
 	left_grayscale_viewport_container->call_deferred("add_child", left_grayscale_viewport);
 	right_grayscale_viewport_container->call_deferred("add_child", right_grayscale_viewport);
 	disparity_viewport_container->call_deferred("add_child", disparity_viewport);
+	depth_viewport_container->call_deferred("add_child", depth_viewport);
 
 	left_grayscale_viewport->call_deferred("add_child", left_grayscale_camera);
 	right_grayscale_viewport->call_deferred("add_child", right_grayscale_camera);
 	disparity_viewport->call_deferred("add_child", disparity_camera);
+	depth_viewport->call_deferred("add_child", depth_camera);
 
 	left_grayscale_camera->call_deferred("add_child", left_grayscale_texture_rect);
 	right_grayscale_camera->call_deferred("add_child", right_grayscale_texture_rect);
 	disparity_camera->call_deferred("add_child", disparity_texture_rect);
+	depth_camera->call_deferred("add_child", depth_texture_rect);
 
 	left_grayscale_viewport->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
 	right_grayscale_viewport->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
 	disparity_viewport->set_size(Vector2(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS));
+	depth_viewport->set_size(Vector2(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS));
 
 	left_grayscale_viewport_container->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
 	right_grayscale_viewport_container->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
 	disparity_viewport_container->set_size(Vector2(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS));
+	depth_viewport_container->set_size(Vector2(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS));
 
 	left_grayscale_viewport_container->set_position(Vector2(0, CAMERA_RESOLUTION));
 	right_grayscale_viewport_container->set_position(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
 	disparity_viewport_container->set_position(Vector2(CAMERA_RESOLUTION*2, CAMERA_RESOLUTION));
+	depth_viewport_container->set_position(Vector2(CAMERA_RESOLUTION*3, CAMERA_RESOLUTION));
 
 	left_grayscale_texture_rect->set_position(Vector2(-CAMERA_RESOLUTION/2, -CAMERA_RESOLUTION/2));
 	right_grayscale_texture_rect->set_position(Vector2(-CAMERA_RESOLUTION/2, -CAMERA_RESOLUTION/2));
 	disparity_texture_rect->set_position(Vector2(-CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS/2, -CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS/2));
+	depth_texture_rect->set_position(Vector2(-CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS/2, -CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS/2));
 
 	// Create the output debug grayscale textures in 8-bit grayscale since that's all Godot offers
 	left_grayscale_image = Image::create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, false, godot::Image::FORMAT_L8);
@@ -207,20 +250,24 @@ void CamNavDemoNode::_ready(){
 	right_grayscale_image = Image::create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, false, godot::Image::FORMAT_L8);
 	right_grayscale_image.ptr()->fill(Color(1.0f, 1.0f, 0.0f));
 
-	disparity_image = Image::create(CAMERA_RESOLUTION/4, CAMERA_RESOLUTION/4, false, godot::Image::FORMAT_L8);
+	disparity_image = Image::create(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, false, godot::Image::FORMAT_RH);
 	disparity_image.ptr()->fill(Color(1.0f, 1.0f, 0.0f));
+
+	depth_image = Image::create(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, false, godot::Image::FORMAT_RH);
+	depth_image.ptr()->fill(Color(1.0f, 1.0f, 1.0f));
 
 	left_grayscale_texture.ptr()->set_image(left_grayscale_image);
 	right_grayscale_texture.ptr()->set_image(right_grayscale_image);
 	disparity_texture.ptr()->set_image(disparity_image);
+	depth_texture.ptr()->set_image(depth_image);
 
 	left_grayscale_texture_rect->set_texture(left_grayscale_texture);
 	right_grayscale_texture_rect->set_texture(right_grayscale_texture);
 	disparity_texture_rect->set_texture(disparity_texture);
-
+	depth_texture_rect->set_texture(depth_texture);
 
 	// Create the cam_nav library instance
-	cam_nav = cam_nav_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, SEARCH_WINDOW_DIMENSIONS, baseline, 0.0f, true);
+	cam_nav = cam_nav_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, SEARCH_WINDOW_DIMENSIONS, baseline, left_camera_physical_attribute.ptr()->get_focal_length(), true);
 
 	if(cam_nav == NULL){
 		UtilityFunctions::print("ERROR: Could not create cam_nav library! Likely an issue with search window not being a multiple of the width or height of the camera!");
@@ -228,6 +275,7 @@ void CamNavDemoNode::_ready(){
 
 	cam_nav_set_on_grayscale_cb(cam_nav, on_grayscale, this);
 	cam_nav_set_on_disparity_cb(cam_nav, on_disparity, this);
+	cam_nav_set_on_depth_cb(cam_nav, on_depth, this);
 }
 
 
