@@ -53,17 +53,24 @@ public:
     Camera2D                    *left_grayscale_camera = nullptr;
     TextureRect                 *left_grayscale_texture_rect;
     godot::Ref<ImageTexture>    left_grayscale_texture;
-    godot::Ref<Image>           left_grayscale_iamge;
+    godot::Ref<Image>           left_grayscale_image;
 
     SubViewportContainer        *right_grayscale_viewport_container = nullptr;
     SubViewport                 *right_grayscale_viewport = nullptr;
     Camera2D                    *right_grayscale_camera = nullptr;
     TextureRect                 *right_grayscale_texture_rect;
     godot::Ref<ImageTexture>    right_grayscale_texture;
-    godot::Ref<Image>           right_grayscale_iamge;
+    godot::Ref<Image>           right_grayscale_image;
+
+    SubViewportContainer        *disparity_viewport_container = nullptr;
+    SubViewport                 *disparity_viewport = nullptr;
+    Camera2D                    *disparity_camera = nullptr;
+    TextureRect                 *disparity_texture_rect;
+    godot::Ref<ImageTexture>    disparity_texture;
+    godot::Ref<Image>           disparity_image;
 
     // How many units apart are the stereo eye origins
-    float baseline = 2.0f;
+    float baseline = 1.0f;
 
     void _ready();
 	void _process(float delta);

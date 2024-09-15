@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <math.h>
+#include <float.h>
 
 
 // On some platforms, it is required to store large buffers
@@ -60,14 +62,13 @@ typedef struct cam_nav_t{
     // dimensions in the original and compare
     // buffers
     uint32_t (*aggregate_pixel_comparer)(cam_nav_t *cam_nav,
-                                         uint16_t *original_cam_buffer,
-                                         uint16_t *compare_cam_buffer,
-                                         uint32_t buffer_stride,
-                                         uint16_t original_window_x,
-                                         uint16_t original_window_y,
-                                         uint16_t compare_window_x,
-                                         uint16_t compare_window_y,
-                                         uint8_t window_dimensions);
+                                      uint16_t *original_cam_buffer,
+                                      uint16_t *compare_cam_buffer,
+                                      uint16_t original_window_x,
+                                      uint16_t original_window_y,
+                                      uint16_t compare_window_x,
+                                      uint16_t compare_window_y,
+                                      uint8_t window_dimensions);
 
     uint32_t pixel_count;                       // Number of pixels in an individual camera
     uint32_t depth_cell_count;                  // Number of depth cells total after search window subdivision
@@ -86,6 +87,9 @@ typedef struct cam_nav_t{
 
     void *grayscale_opaque_ptr;
     void (*on_grayscale_cb)(void *grayscale_opaque_ptr, cam_nav_camera_side side, uint16_t *grayscale_frame_buffer, uint16_t pixel_width, uint16_t pixel_height);
+
+    void *disparity_opaque_ptr;
+    void (*on_disparity_cb)(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t disparity_width, uint16_t disparity_height);
 
     can_nav_status_t status_code;               // OK by default since 0 by default but gets set to any error code throughout the library
 }cam_nav_t;
@@ -111,11 +115,24 @@ inline can_nav_status_t cam_nav_get_status_code(cam_nav_t *cam_nav){
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
 // https://johnwlambert.github.io/stereo/
-inline uint32_t cam_nav_sad_comparer(cam_nav_t *cam_nav, uint16_t *original_cam_buffer, uint16_t *compare_cam_buffer, uint32_t buffer_stride,
+inline uint32_t cam_nav_sad_comparer(cam_nav_t *cam_nav, uint16_t *original_cam_buffer, uint16_t *compare_cam_buffer,
                                                uint16_t original_window_x, uint16_t original_window_y,
                                                uint16_t compare_window_x, uint16_t compare_window_y,
                                                uint8_t window_dimensions){
-    return 0;
+    
+    // SAD
+    uint32_t sad = 0;
+
+    for(uint16_t y=0; y<window_dimensions; y++){
+        for(uint16_t x=0; x<window_dimensions; x++){
+            int32_t original_sample = (int32_t)original_cam_buffer[(original_window_y+y)*cam_nav->width + (original_window_x+x)];
+            int32_t compare_sample = (int32_t)compare_cam_buffer[(compare_window_y+y)*cam_nav->width + (compare_window_x+x)];
+
+            sad += abs(original_sample - compare_sample);
+        }
+    }
+
+    return sad;
 }
 
 
@@ -148,6 +165,9 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
 
     cam_nav->grayscale_opaque_ptr = NULL;
     cam_nav->on_grayscale_cb = NULL;
+
+    cam_nav->disparity_opaque_ptr = NULL;
+    cam_nav->on_disparity_cb = NULL;
 
     // Depth resolution is only as good as the search window
     cam_nav->depth_width = cam_nav->width / cam_nav->search_window_dimensions;
@@ -214,6 +234,14 @@ inline void cam_nav_set_on_grayscale_cb(cam_nav_t *cam_nav,
 }
 
 
+inline void cam_nav_set_on_disparity_cb(cam_nav_t *cam_nav,
+                                        void (*on_disparity_cb)(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t disparity_width, uint16_t disparity_height),
+                                        void *disparity_opaque_ptr){
+    cam_nav->on_disparity_cb = on_disparity_cb;
+    cam_nav->disparity_opaque_ptr = disparity_opaque_ptr;
+}
+
+
 // Give back the memory for various buffers
 inline void cam_nav_destroy(cam_nav_t *cam_nav){
     // Only deallocate buffers if they are set and not custom
@@ -267,6 +295,7 @@ inline void cam_nav_convert_rgb656_to_grayscale(uint16_t *buffer, uint32_t pixel
         float b_normal = (float)b / (float)b_total_magnitude;
 
         // https://en.wikipedia.org/wiki/Grayscale#:~:text=Ylinear%2C-,which%20is%20given%20by,-%5B6%5D
+        // 0.0 ~ 1.0
         float luminance = 0.2126*r_normal + 0.7152*g_normal + 0.07122*b_normal;
 
         // Put the linear value back into the buffer for
@@ -275,6 +304,40 @@ inline void cam_nav_convert_rgb656_to_grayscale(uint16_t *buffer, uint32_t pixel
         buffer[i] = (uint16_t)(luminance * (float)UINT16_MAX);
     }
 }
+
+
+inline uint16_t cam_nav_search_right_eye_line(cam_nav_t *cam_nav, uint16_t left_cell_x, uint16_t left_cell_y){
+    // Starting from same location in right eye, move left in right
+    // eye by a search window amount each time until reach end then
+    // calculate difference in x (disparity) for most similar block's
+    // x
+    uint16_t most_similar_block_x = left_cell_x;
+    uint32_t smallest_difference = UINT32_MAX;
+
+    int32_t right_cell_y = left_cell_y;
+    for(int32_t right_cell_x=left_cell_x; right_cell_x>=0 && right_cell_x<=left_cell_x; right_cell_x--){
+        uint32_t current_difference = cam_nav->aggregate_pixel_comparer(cam_nav,
+                                                        cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA],
+                                                        cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA],
+                                                        left_cell_x*cam_nav->search_window_dimensions,
+                                                        left_cell_y*cam_nav->search_window_dimensions,
+                                                        right_cell_x*cam_nav->search_window_dimensions,
+                                                        right_cell_y*cam_nav->search_window_dimensions,
+                                                        cam_nav->search_window_dimensions);
+        
+        if(current_difference < smallest_difference){
+            smallest_difference = current_difference;
+            most_similar_block_x = right_cell_x;
+        }
+    }
+
+    // Now that we have the block X with the smallest difference to the one
+    // in the left eye, calculate difference in X (disparity)
+    uint16_t left_abs_x = (float)(left_cell_x*cam_nav->search_window_dimensions);
+    uint16_t most_similar_abs_x = (float)(most_similar_block_x*cam_nav->search_window_dimensions);
+    return abs(left_abs_x - most_similar_abs_x);
+}
+
 
 // Left and right camera buffers are full, process them
 inline bool cam_nav_process(cam_nav_t *cam_nav){
@@ -298,37 +361,13 @@ inline bool cam_nav_process(cam_nav_t *cam_nav){
     for(int32_t left_cell_y=0; left_cell_y<cam_nav->depth_height; left_cell_y++){
         for(int32_t left_cell_x=0; left_cell_x<cam_nav->depth_width; left_cell_x++){
 
-            // // Starting from same location in right eye, move left in right
-            // // eye by a search window amount each time until reach end then
-            // // calculate difference in x (disparity) for most similar block's
-            // // x
-            // int32_t most_similar_block_x = left_cell_x;
-            // int32_t smallest_difference = UINT32_MAX;
+            uint16_t disparity = cam_nav_search_right_eye_line(cam_nav, left_cell_x, left_cell_y);\
+            cam_nav->depth_buffer[left_cell_y*cam_nav->depth_width + left_cell_x] = (float)disparity;
 
-            // int32_t right_cell_y = left_cell_y;
-            // for(int32_t right_cell_x=left_cell_x; right_cell_x>=0 && right_cell_x<=left_cell_x; right_cell_x--){
-            //     int32_t current_difference = cam_nav->aggregate_pixel_comparer(cam_nav,
-            //                                                    cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA],
-            //                                                    cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA],
-            //                                                    cam_nav->width * sizeof(uint16_t),
-            //                                                    left_cell_x*cam_nav->search_window_dimensions,
-            //                                                    left_cell_y*cam_nav->search_window_dimensions,
-            //                                                    right_cell_x*cam_nav->search_window_dimensions,
-            //                                                    right_cell_y*cam_nav->search_window_dimensions,
-            //                                                    cam_nav->search_window_dimensions);
-                
-            //     if(current_difference < smallest_difference){
-            //         smallest_difference = current_difference;
-            //         most_similar_block_x = right_cell_x;
-            //     }
-            // }
-
-            // // Now that we have the block X with the smallest difference to the one
-            // // in the left eye, calculate difference in X (disparity)
-            // // ...
-            // int32_t disparity = abs(left_cell_x - most_similar_block_x);
         }
     }
+
+    if(cam_nav->on_disparity_cb != NULL) cam_nav->on_disparity_cb(cam_nav->disparity_opaque_ptr, cam_nav->depth_buffer, cam_nav->depth_width, cam_nav->depth_height);
 
     return true;
 }

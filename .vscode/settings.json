@@ -4,6 +4,8 @@
     "files.associations": {
         "ios": "cpp",
         "xiosbase": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "cmath": "c",
+        "cstdlib": "cpp"
     }
 }
