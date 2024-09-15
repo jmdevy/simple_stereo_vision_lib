@@ -1,7 +1,6 @@
 #include "cam_nav_demo_node.h"
 
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -9,6 +8,41 @@
 #define CAMERA_RESOLUTION 256
 
 using namespace godot;
+
+
+// Debug function that can be invoked by `cam_nav` just
+// after the input feed frames are converted to grayscale.
+// This is just for debugging.
+void on_grayscale(void *grayscale_opaque_ptr, cam_nav_camera_side side, uint16_t *grayscale_frame_buffer, uint16_t pixel_width, uint16_t pixel_height){
+	// Get the class instance back and make reference variables for
+	// texture and image for this side
+	CamNavDemoNode *instance = (CamNavDemoNode*)grayscale_opaque_ptr;
+	godot::Ref<ImageTexture>    grayscale_texture;
+    godot::Ref<Image>           grayscale_iamge;
+	
+	// Determine the side
+	if(side == CAM_NAV_LEFT_CAMERA){
+		grayscale_texture = instance->left_grayscale_texture;
+		grayscale_iamge = instance->left_grayscale_iamge;
+	}else{
+		grayscale_texture = instance->right_grayscale_texture;
+		grayscale_iamge = instance->right_grayscale_iamge;
+	}
+
+	// For each incoming grayscale single component value
+	// from `cam_nav`, get it and convert it from 16-bit
+	// int luminance to 0.0 ~ 1.0 luminance and then set
+	// pixel using that since output texture is 8-bit
+	for(uint16_t y=0; y<pixel_height; y++){
+		for(uint16_t x=0; x<pixel_width; x++){
+			float magnitude = (float)grayscale_frame_buffer[y*pixel_width + x] / (float)UINT16_MAX;
+			grayscale_iamge.ptr()->set_pixel(x, y, Color(magnitude, magnitude, magnitude));
+		}
+	}
+
+	// Update the image to show it on screen
+	grayscale_texture.ptr()->set_image(grayscale_iamge);
+}
 
 
 void CamNavDemoNode::_bind_methods(){
@@ -56,8 +90,8 @@ void CamNavDemoNode::_ready(){
 	right_viewport->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
 
 	// Adjust visible view ports in window without modifying actual render resolution
-	// Ensure view ports are always 512x512 on the monitor
-	float scale = 512/left_viewport->get_size().x;
+	// Ensure view ports are always 256x256 on the monitor
+	float scale = 256/left_viewport->get_size().x;
 	left_viewport_container->set_scale(Vector2(scale, scale));
 	right_viewport_container->set_scale(Vector2(scale, scale));
 
@@ -84,12 +118,68 @@ void CamNavDemoNode::_ready(){
 	left_texture = left_viewport->get_texture();
 	right_texture = right_viewport->get_texture();
 
+
+	// Create outputs for images generated from library
+	left_grayscale_viewport_container = memnew(SubViewportContainer);
+	left_grayscale_viewport = memnew(SubViewport);
+	left_grayscale_camera = memnew(Camera2D);
+	left_grayscale_texture_rect = memnew(TextureRect);
+	left_grayscale_texture.instantiate();
+
+	right_grayscale_viewport_container = memnew(SubViewportContainer);
+	right_grayscale_viewport = memnew(SubViewport);
+	right_grayscale_camera = memnew(Camera2D);
+	right_grayscale_texture_rect = memnew(TextureRect);
+	right_grayscale_texture.instantiate();
+
+	Node3D *parent = get_parent_node_3d();
+
+	parent->call_deferred("add_child", left_grayscale_viewport_container);
+	parent->call_deferred("add_child", right_grayscale_viewport_container);
+
+	left_grayscale_viewport_container->call_deferred("add_child", left_grayscale_viewport);
+	right_grayscale_viewport_container->call_deferred("add_child", right_grayscale_viewport);
+
+	left_grayscale_viewport->call_deferred("add_child", left_grayscale_camera);
+	right_grayscale_viewport->call_deferred("add_child", right_grayscale_camera);
+
+	left_grayscale_camera->call_deferred("add_child", left_grayscale_texture_rect);
+	right_grayscale_camera->call_deferred("add_child", right_grayscale_texture_rect);
+
+	left_grayscale_viewport->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
+	right_grayscale_viewport->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
+
+	left_grayscale_viewport_container->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
+	right_grayscale_viewport_container->set_size(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
+
+	left_grayscale_viewport_container->set_position(Vector2(0, CAMERA_RESOLUTION));
+	right_grayscale_viewport_container->set_position(Vector2(CAMERA_RESOLUTION, CAMERA_RESOLUTION));
+
+	left_grayscale_texture_rect->set_position(Vector2(-CAMERA_RESOLUTION/2, -CAMERA_RESOLUTION/2));
+	right_grayscale_texture_rect->set_position(Vector2(-CAMERA_RESOLUTION/2, -CAMERA_RESOLUTION/2));
+
+	// Create the output debug grayscale textures in 8-bit grayscale since that's all Godot offers
+	left_grayscale_iamge = Image::create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, false, godot::Image::FORMAT_L8);
+	left_grayscale_iamge.ptr()->fill(Color(1.0f, 0.0f, 0.0f));
+
+	right_grayscale_iamge = Image::create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, false, godot::Image::FORMAT_L8);
+	right_grayscale_iamge.ptr()->fill(Color(1.0f, 1.0f, 0.0f));
+
+	left_grayscale_texture.ptr()->set_image(left_grayscale_iamge);
+	right_grayscale_texture.ptr()->set_image(right_grayscale_iamge);
+
+	left_grayscale_texture_rect->set_texture(left_grayscale_texture);
+	right_grayscale_texture_rect->set_texture(right_grayscale_texture);
+
+
 	// Create the cam_nav library instance
-	cam_nav = cam_nav_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, 4, true);
+	cam_nav = cam_nav_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, 4, baseline, 0.0f, true);
 
 	if(cam_nav == NULL){
 		UtilityFunctions::print("ERROR: Could not create cam_nav library! Likely an issue with search window not being a multiple of the width or height of the camera!");
 	}
+
+	cam_nav_set_on_grayscale_cb(cam_nav, on_grayscale, this);
 }
 
 
@@ -113,6 +203,27 @@ void CamNavDemoNode::_process(float delta){
 	PackedByteArray left_byte_array = left_image.ptr()->get_data();
 	PackedByteArray right_byte_array = right_image.ptr()->get_data();
 
+	// uint16_t *data = (uint16_t*)left_byte_array.ptr();
+
+	// for(uint16_t y=0; y<CAMERA_RESOLUTION; y++){
+	// 	for(uint16_t x=0; x<CAMERA_RESOLUTION; x++){
+
+	// 		uint16_t r = data[y*CAMERA_RESOLUTION+x] & 0b1111100000000000;
+	// 		uint16_t g = data[y*CAMERA_RESOLUTION+x] & 0b0000011111100000;
+	// 		uint16_t b = data[y*CAMERA_RESOLUTION+x] & 0b0000000000011111;
+
+	// 		float rf = (float)r / (float)0b1111100000000000;
+	// 		float gf = (float)g / (float)0b0000011111100000;
+	// 		float bf = (float)b / (float)0b0000000000011111;
+
+	// 		left_grayscale_iamge.ptr()->set_pixel(x, y, Color(rf, gf, bf));
+	// 	}
+	// }
+
+	// // left_grayscale_iamge.ptr()->set_data(CAMERA_RESOLUTION, CAMERA_RESOLUTION, false, godot::Image::FORMAT_RGB565, left_byte_array);
+	// left_grayscale_texture.ptr()->set_image(left_grayscale_iamge);
+
+	// Feed and process frames in `cam_nav`
 	if(cam_nav_feed(cam_nav, CAM_NAV_LEFT_CAMERA, left_byte_array.ptr(), left_byte_array.size()) == false){
 		UtilityFunctions::print("ERROR: Too much data for left cam_nav eye!");
 	}

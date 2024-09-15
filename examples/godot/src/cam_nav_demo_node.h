@@ -5,12 +5,16 @@
 #include <godot_cpp/classes/character_body3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/camera2d.hpp>
 #include <godot_cpp/classes/sub_viewport_container.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/viewport_texture.hpp>
+#include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 #include "../../../cam_nav.h"
 
 using namespace godot;
@@ -37,12 +41,26 @@ private:
     Node3D *right_origin;
 	Node3D *right_rotation_origin;
 
-    void *cam_nav = nullptr;
+    cam_nav_t *cam_nav = nullptr;
 protected:
     static void _bind_methods();
 public:
     CamNavDemoNode();
     ~CamNavDemoNode();
+
+    SubViewportContainer        *left_grayscale_viewport_container = nullptr;
+    SubViewport                 *left_grayscale_viewport = nullptr;
+    Camera2D                    *left_grayscale_camera = nullptr;
+    TextureRect                 *left_grayscale_texture_rect;
+    godot::Ref<ImageTexture>    left_grayscale_texture;
+    godot::Ref<Image>           left_grayscale_iamge;
+
+    SubViewportContainer        *right_grayscale_viewport_container = nullptr;
+    SubViewport                 *right_grayscale_viewport = nullptr;
+    Camera2D                    *right_grayscale_camera = nullptr;
+    TextureRect                 *right_grayscale_texture_rect;
+    godot::Ref<ImageTexture>    right_grayscale_texture;
+    godot::Ref<Image>           right_grayscale_iamge;
 
     // How many units apart are the stereo eye origins
     float baseline = 2.0f;

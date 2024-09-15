@@ -3,6 +3,7 @@
     "cmake.configureOnOpen": true,
     "files.associations": {
         "ios": "cpp",
-        "xiosbase": "cpp"
+        "xiosbase": "cpp",
+        "set": "cpp"
     }
 }

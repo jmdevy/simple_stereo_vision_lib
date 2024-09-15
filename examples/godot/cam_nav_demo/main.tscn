@@ -1,11 +1,19 @@
-[gd_scene load_steps=2 format=3 uid="uid://drhnu8mt1di0m"]
+[gd_scene load_steps=5 format=3 uid="uid://drhnu8mt1di0m"]
 
 [sub_resource type="Environment" id="Environment_6nhf0"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_0pu71"]
+albedo_color = Color(0.882811, 0.337361, 1, 1)
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_bwlmm"]
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_oqgy5"]
+noise = SubResource("FastNoiseLite_bwlmm")
 
 [node name="Node3D" type="Node3D"]
 
 [node name="CSGBox3D" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.287781, -0.770708, 0.183862)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.287781, -2.84553, 0.183862)
 size = Vector3(23.2529, 1, 23.0198)
 
 [node name="CamNavDemoNode" type="CamNavDemoNode" parent="."]
@@ -19,3 +27,26 @@ shadow_enabled = true
 
 [node name="CSGBox3D2" type="CSGBox3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6842, 0)
+material = SubResource("StandardMaterial3D_0pu71")
+
+[node name="SubViewportContainer" type="SubViewportContainer" parent="."]
+visible = false
+offset_right = 256.0
+offset_bottom = 256.0
+scale = Vector2(2, 2)
+
+[node name="SubViewport" type="SubViewport" parent="SubViewportContainer"]
+handle_input_locally = false
+size = Vector2i(128, 128)
+render_target_update_mode = 0
+
+[node name="Camera2D" type="Camera2D" parent="SubViewportContainer/SubViewport"]
+visible = false
+
+[node name="TextureRect" type="TextureRect" parent="SubViewportContainer/SubViewport/Camera2D"]
+visible = false
+offset_left = -64.0
+offset_top = -64.0
+offset_right = 448.0
+offset_bottom = 448.0
+texture = SubResource("NoiseTexture2D_oqgy5")

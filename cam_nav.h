@@ -1,6 +1,8 @@
 #ifndef CAM_NAV_H
 #define CAM_NAV_H
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -41,6 +43,9 @@ typedef struct cam_nav_t{
     uint16_t width;                             // Width resolution of camera
     uint16_t height;                            // height resolution of camera
 
+    uint16_t depth_width;                       // Width of depth buffer is width/`search_window_dimensions` cells wide
+    uint16_t depth_height;                      // height of depth buffer is height/`search_window_dimensions` cells high
+
     float baseline_mm;                          // Distance between cameras on same plane in mm
     float focal_length_mm;                      // Focal length (distance between sensor and lens) in mm
 
@@ -54,15 +59,18 @@ typedef struct cam_nav_t{
     // in the passed window location and
     // dimensions in the original and compare
     // buffers
-    float (*aggregate_pixel_comparer)(cam_nav_t *cam_nav,
-                                      uint16_t *original_cam_buffer,
-                                      uint16_t *compare_cam_buffer,
-                                      uint32_t buffer_stride,
-                                      uint16_t window_x,
-                                      uint16_t window_y,
-                                      uint8_t window_dimensions);
+    uint32_t (*aggregate_pixel_comparer)(cam_nav_t *cam_nav,
+                                         uint16_t *original_cam_buffer,
+                                         uint16_t *compare_cam_buffer,
+                                         uint32_t buffer_stride,
+                                         uint16_t original_window_x,
+                                         uint16_t original_window_y,
+                                         uint16_t compare_window_x,
+                                         uint16_t compare_window_y,
+                                         uint8_t window_dimensions);
 
     uint32_t pixel_count;                       // Number of pixels in an individual camera
+    uint32_t depth_cell_count;                  // Number of depth cells total after search window subdivision
     uint32_t frame_buffer_size;                 // Size, in bytes, of individual frame buffers
     uint32_t depth_buffer_size;                 // Size, in bytes, of the depth buffer
 
@@ -76,9 +84,11 @@ typedef struct cam_nav_t{
     bool buffers_set;                           // Flag indicating if frame and depth buffers are allocated/set
     bool custom_buffers_set;                    // Flag indicating if frame and depth buffers are memory from outside the library (do not deallocate custom buffers, user's problem)
 
+    void *grayscale_opaque_ptr;
+    void (*on_grayscale_cb)(void *grayscale_opaque_ptr, cam_nav_camera_side side, uint16_t *grayscale_frame_buffer, uint16_t pixel_width, uint16_t pixel_height);
+
     can_nav_status_t status_code;               // OK by default since 0 by default but gets set to any error code throughout the library
 }cam_nav_t;
-
 
 
 // ///////////////////////////////////////////
@@ -100,8 +110,12 @@ inline can_nav_status_t cam_nav_get_status_code(cam_nav_t *cam_nav){
 //   AGGREGATE PIXEL BLOCK COMPARE FUNCTIONS
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
-float cam_nav_sad_comparer(cam_nav_t *cam_nav, uint16_t *original_cam_buffer, uint16_t *compare_cam_buffer, uint32_t buffer_stride, uint16_t window_x, uint16_t window_y, uint8_t window_dimensions){
-    
+// https://johnwlambert.github.io/stereo/
+inline uint32_t cam_nav_sad_comparer(cam_nav_t *cam_nav, uint16_t *original_cam_buffer, uint16_t *compare_cam_buffer, uint32_t buffer_stride,
+                                               uint16_t original_window_x, uint16_t original_window_y,
+                                               uint16_t compare_window_x, uint16_t compare_window_y,
+                                               uint8_t window_dimensions){
+    return 0;
 }
 
 
@@ -115,7 +129,7 @@ float cam_nav_sad_comparer(cam_nav_t *cam_nav, uint16_t *original_cam_buffer, ui
 //
 // Set `allocate` to `true` if the library should allocate frame and depth buffers, otherwise, set
 // false if you're going to call `cam_nav_set_buffers` to reuse memory you may already have allocated
-inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, uint8_t search_window_dimensions, float baseline_mm, float focal_length_mm, bool allocate){
+inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, uint8_t search_window_dimensions, float baseline_mm, float focal_length_mm, bool allocate){
     // Create the library instance for the user to store and re-use
     cam_nav_t *cam_nav = (cam_nav_t*)CAM_NAV_MALLOC(sizeof(cam_nav_t));
 
@@ -129,8 +143,16 @@ inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, uin
     cam_nav->width = cameras_width;
     cam_nav->height = cameras_height;
     cam_nav->search_window_dimensions = search_window_dimensions;
-    cam_nav->baseline_mm == baseline_mm;
-    cam_nav->focal_length_mm == focal_length_mm;
+    cam_nav->baseline_mm = baseline_mm;
+    cam_nav->focal_length_mm = focal_length_mm;
+
+    cam_nav->grayscale_opaque_ptr = NULL;
+    cam_nav->on_grayscale_cb = NULL;
+
+    // Depth resolution is only as good as the search window
+    cam_nav->depth_width = cam_nav->width / cam_nav->search_window_dimensions;
+    cam_nav->depth_height = cam_nav->height / cam_nav->search_window_dimensions;
+    cam_nav->depth_cell_count = cam_nav->depth_width * cam_nav->depth_height;
 
     // Set the default algorithm that compares pixel
     // blocks on 1D search line between left and right
@@ -140,16 +162,16 @@ inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, uin
     // Calculate number of pixels and elements in frame and depth buffers
     cam_nav->pixel_count = cameras_width*cameras_height;
     cam_nav->frame_buffer_size = cam_nav->pixel_count * sizeof(uint16_t);
-    cam_nav->depth_buffer_size = cam_nav->pixel_count * sizeof(float);
+    cam_nav->depth_buffer_size = cam_nav->depth_cell_count * sizeof(float);
 
     // Stop here if user does not want cam_nav to make buffers
     if(allocate == false){
-        return (void*)cam_nav;
+        return cam_nav;
     }
 
     // Allocate space for the individual camera frame buffers
-    cam_nav->frame_buffers[0] = (uint16_t*)CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
-    cam_nav->frame_buffers[1] = (uint16_t*)CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
+    cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA] = (uint16_t*)CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
+    cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA] = (uint16_t*)CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
 
     // Allocate space for the depth buffer
     cam_nav->depth_buffer = (float*)CAM_NAV_MALLOC(cam_nav->depth_buffer_size);
@@ -160,7 +182,7 @@ inline void *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, uin
     cam_nav->buffers_set = true;
     cam_nav->custom_buffers_set = false;
 
-    return (void*)cam_nav;
+    return cam_nav;
 }
 
 
@@ -181,6 +203,14 @@ inline bool cam_nav_set_buffers(cam_nav_t *cam_nav, uint16_t *frame_buffers[], u
     // Buffers are ready and are custom (not do deallocate on deinit of library)
     cam_nav->buffers_set = true;
     cam_nav->custom_buffers_set = true;
+}
+
+
+inline void cam_nav_set_on_grayscale_cb(cam_nav_t *cam_nav,
+                                        void (*on_grayscale_cb)(void *grayscale_opaque_ptr, cam_nav_camera_side side, uint16_t *grayscale_frame_buffer, uint16_t pixel_width, uint16_t pixel_height),
+                                        void *grayscale_opaque_ptr){
+    cam_nav->on_grayscale_cb = on_grayscale_cb;
+    cam_nav->grayscale_opaque_ptr = grayscale_opaque_ptr;
 }
 
 
@@ -206,28 +236,99 @@ inline void cam_nav_destroy(cam_nav_t *cam_nav){
 //          PRIMARY LIBRARY USAGE
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
-inline bool cam_nav_hog(cam_nav_t *cam_nav){
+// Converts 16-bit RGB565 to 16-bit grayscale
+// https://en.wikipedia.org/wiki/Grayscale#:~:text=Ylinear%2C-,which%20is%20given%20by,-%5B6%5D
+inline void cam_nav_convert_rgb656_to_grayscale(uint16_t *buffer, uint32_t pixel_count){
+    // Masks for bits for each color channel
+    const uint16_t r_mask = 0b1111100000000000;
+    const uint16_t g_mask = 0b0000011111100000;
+    const uint16_t b_mask = 0b0000000000011111;
 
+    // Amount to shift right to get bits as normal byte int
+    const uint8_t r_shift_amount = 11;
+    const uint8_t g_shift_amount = 5;
+    const uint8_t b_shift_amount = 0;
+
+    // Total magnitude of each color channel is when all bits
+    // in the channel are 1, which happens to be the mask
+    const uint16_t r_total_magnitude = r_mask >> r_shift_amount;
+    const uint16_t g_total_magnitude = g_mask >> g_shift_amount;
+    const uint16_t b_total_magnitude = b_mask >> b_shift_amount;
+
+    for(uint32_t i=0; i<pixel_count; i++){
+        // Extract the color channel bits and shift all the way right
+        uint16_t r = (buffer[i] & r_mask) >> r_shift_amount;
+        uint16_t g = (buffer[i] & g_mask) >> g_shift_amount;
+        uint16_t b = (buffer[i] & b_mask) >> b_shift_amount;
+
+        // Normalize each channel to 0.0 ~ 1.0
+        float r_normal = (float)r / (float)r_total_magnitude;
+        float g_normal = (float)g / (float)g_total_magnitude;
+        float b_normal = (float)b / (float)b_total_magnitude;
+
+        // https://en.wikipedia.org/wiki/Grayscale#:~:text=Ylinear%2C-,which%20is%20given%20by,-%5B6%5D
+        float luminance = 0.2126*r_normal + 0.7152*g_normal + 0.07122*b_normal;
+
+        // Put the linear value back into the buffer for
+        // disparity pixel block comparisons as a int
+        // with 16-bits for resolution
+        buffer[i] = (uint16_t)(luminance * (float)UINT16_MAX);
+    }
 }
-
-
-// https://johnwlambert.github.io/stereo/
-inline bool cam_nav_depth(cam_nav_t *cam_nav){
-
-}
-
-
-// https://johnwlambert.github.io/stereo/
-inline bool cam_nav_disparity(cam_nav_t *cam_nav){
-
-}
-
 
 // Left and right camera buffers are full, process them
 inline bool cam_nav_process(cam_nav_t *cam_nav){
+    // We have both frames from both cameras, need to go through
+    // and calculate disparity for each pixel block and then the
+    // depth for each pixel block
+
     // Reset these for next incoming frames after processing
     cam_nav->frame_buffers_amounts[CAM_NAV_LEFT_CAMERA] = 0;
     cam_nav->frame_buffers_amounts[CAM_NAV_RIGHT_CAMERA] = 0;
+
+    // Before relating blocks between left and right eyes, 
+    // change the 3 component pixels to single component
+    // linear values of intensity, grayscale
+    cam_nav_convert_rgb656_to_grayscale(cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA], cam_nav->pixel_count);
+    cam_nav_convert_rgb656_to_grayscale(cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA], cam_nav->pixel_count);
+
+    if(cam_nav->on_grayscale_cb != NULL) cam_nav->on_grayscale_cb(cam_nav->grayscale_opaque_ptr, CAM_NAV_LEFT_CAMERA, cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA], cam_nav->width, cam_nav->height);
+    if(cam_nav->on_grayscale_cb != NULL) cam_nav->on_grayscale_cb(cam_nav->grayscale_opaque_ptr, CAM_NAV_RIGHT_CAMERA, cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA], cam_nav->width, cam_nav->height);
+
+    for(int32_t left_cell_y=0; left_cell_y<cam_nav->depth_height; left_cell_y++){
+        for(int32_t left_cell_x=0; left_cell_x<cam_nav->depth_width; left_cell_x++){
+
+            // // Starting from same location in right eye, move left in right
+            // // eye by a search window amount each time until reach end then
+            // // calculate difference in x (disparity) for most similar block's
+            // // x
+            // int32_t most_similar_block_x = left_cell_x;
+            // int32_t smallest_difference = UINT32_MAX;
+
+            // int32_t right_cell_y = left_cell_y;
+            // for(int32_t right_cell_x=left_cell_x; right_cell_x>=0 && right_cell_x<=left_cell_x; right_cell_x--){
+            //     int32_t current_difference = cam_nav->aggregate_pixel_comparer(cam_nav,
+            //                                                    cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA],
+            //                                                    cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA],
+            //                                                    cam_nav->width * sizeof(uint16_t),
+            //                                                    left_cell_x*cam_nav->search_window_dimensions,
+            //                                                    left_cell_y*cam_nav->search_window_dimensions,
+            //                                                    right_cell_x*cam_nav->search_window_dimensions,
+            //                                                    right_cell_y*cam_nav->search_window_dimensions,
+            //                                                    cam_nav->search_window_dimensions);
+                
+            //     if(current_difference < smallest_difference){
+            //         smallest_difference = current_difference;
+            //         most_similar_block_x = right_cell_x;
+            //     }
+            // }
+
+            // // Now that we have the block X with the smallest difference to the one
+            // // in the left eye, calculate difference in X (disparity)
+            // // ...
+            // int32_t disparity = abs(left_cell_x - most_similar_block_x);
+        }
+    }
 
     return true;
 }
