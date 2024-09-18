@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3 uid="uid://drhnu8mt1di0m"]
+[gd_scene load_steps=5 format=3 uid="uid://drhnu8mt1di0m"]
 
 [ext_resource type="Texture2D" uid="uid://4lbros11mkes" path="res://texture_cobble.png" id="1_gqr4q"]
 
@@ -6,14 +6,13 @@
 albedo_texture = ExtResource("1_gqr4q")
 uv1_scale = Vector3(0.5, 0.5, 0.5)
 uv1_triplanar = true
+texture_filter = 0
 
 [sub_resource type="Environment" id="Environment_6nhf0"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_0pu71"]
 albedo_color = Color(0.949003, 0.723736, 1, 1)
 albedo_texture = ExtResource("1_gqr4q")
-
-[sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_vj05x"]
 
 [node name="Node3D" type="Node3D"]
 
@@ -39,6 +38,3 @@ material = SubResource("StandardMaterial3D_0pu71")
 [node name="CSGBox3D3" type="CSGBox3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 3.3684, 8.51596)
 material = SubResource("StandardMaterial3D_0pu71")
-
-[node name="Camera3D" type="Camera3D" parent="."]
-attributes = SubResource("CameraAttributesPhysical_vj05x")

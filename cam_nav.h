@@ -49,7 +49,9 @@ typedef struct cam_nav_t{
     uint16_t depth_height;                      // height of depth buffer is height/`search_window_dimensions` cells high
 
     float baseline_mm;                          // Distance between cameras on same plane in mm
-    float focal_length_mm;                      // Focal length (distance between sensor and lens) in mm
+    float field_of_view_degrees;
+    float focal_length_pixels;                  // Focal length (distance between sensor and lens) in mm
+    float max_depth_mm;
 
     // Called internally by `cam_nav_process`
     // for each window for comparing pixel
@@ -92,7 +94,7 @@ typedef struct cam_nav_t{
     void (*on_disparity_cb)(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t disparity_width, uint16_t disparity_height);
 
     void *depth_opaque_ptr;
-    void (*on_depth_cb)(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height);
+    void (*on_depth_cb)(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height, float max_depth_mm);
 
     can_nav_status_t status_code;               // OK by default since 0 by default but gets set to any error code throughout the library
 }cam_nav_t;
@@ -149,7 +151,7 @@ inline uint32_t cam_nav_sad_comparer(cam_nav_t *cam_nav, uint16_t *original_cam_
 //
 // Set `allocate` to `true` if the library should allocate frame and depth buffers, otherwise, set
 // false if you're going to call `cam_nav_set_buffers` to reuse memory you may already have allocated
-inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, uint8_t search_window_dimensions, float baseline_mm, float focal_length_mm, bool allocate){
+inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height, uint8_t search_window_dimensions, float baseline_mm, float fov_degrees, bool allocate){
     // Create the library instance for the user to store and re-use
     cam_nav_t *cam_nav = (cam_nav_t*)CAM_NAV_MALLOC(sizeof(cam_nav_t));
 
@@ -164,7 +166,15 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
     cam_nav->height = cameras_height;
     cam_nav->search_window_dimensions = search_window_dimensions;
     cam_nav->baseline_mm = baseline_mm;
-    cam_nav->focal_length_mm = focal_length_mm;
+    cam_nav->field_of_view_degrees = fov_degrees;
+
+    // https://answers.opencv.org/question/17076/conversion-focal-distance-from-mm-to-pixels/
+    // https://gamedev.stackexchange.com/questions/166993/interpreting-focal-length-in-units-of-pixels
+    // https://computergraphics.stackexchange.com/questions/10593/is-focal-length-equal-to-the-distance-from-the-optical-center-to-the-near-clippi
+    cam_nav->focal_length_pixels = ((float)cam_nav->width*0.5f) / tanf(fov_degrees * 0.5f * 3.141593f/180.0f);
+
+    // https://stackoverflow.com/a/19423059
+    cam_nav->max_depth_mm = cam_nav->focal_length_pixels * (cam_nav->baseline_mm / 1.0f);
 
     cam_nav->grayscale_opaque_ptr = NULL;
     cam_nav->on_grayscale_cb = NULL;
@@ -208,6 +218,16 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
     cam_nav->buffers_set = true;
     cam_nav->custom_buffers_set = false;
 
+    CAM_NAV_PRINTF("CAM_NAV:");
+    CAM_NAV_PRINTF("\t width (pixels): \t\t\t\t\t\t%d", cam_nav->width);
+    CAM_NAV_PRINTF("\t height (pixels): \t\t\t\t\t\t%d", cam_nav->height);
+    CAM_NAV_PRINTF("\t search_window_dimensions (pixels): \t%d", cam_nav->search_window_dimensions);
+    CAM_NAV_PRINTF("\t baseline (mm): \t\t\t\t\t\t%0.3f", cam_nav->baseline_mm);
+    CAM_NAV_PRINTF("\t FOV (degrees): \t\t\t\t\t\t%0.3f", cam_nav->field_of_view_degrees);
+    CAM_NAV_PRINTF("\t focal length (pixels): \t\t\t\t%0.3f", cam_nav->focal_length_pixels);
+    CAM_NAV_PRINTF("\t max depth (mm): \t\t\t\t\t%0.3f", cam_nav->max_depth_mm);
+    CAM_NAV_PRINTF("\t max depth (m): \t\t\t\t\t%0.3f", cam_nav->max_depth_mm/1000.0f);
+
     return cam_nav;
 }
 
@@ -249,7 +269,7 @@ inline void cam_nav_set_on_disparity_cb(cam_nav_t *cam_nav,
 
 
 inline void cam_nav_set_on_depth_cb(cam_nav_t *cam_nav,
-                                    void (*on_depth_cb)(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height),
+                                    void (*on_depth_cb)(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height, float max_depth_mm),
                                     void *depth_opaque_ptr){
     cam_nav->on_depth_cb = on_depth_cb;
     cam_nav->depth_opaque_ptr = depth_opaque_ptr;
@@ -358,7 +378,11 @@ inline void cam_nav_calculate_depth(cam_nav_t *cam_nav){
         for(int32_t x=0; x<cam_nav->depth_width; x++){
 
             float disparity = cam_nav->depth_buffer[y*cam_nav->depth_width + x];
-            cam_nav->depth_buffer[y*cam_nav->depth_width + x] = cam_nav->focal_length_mm * (cam_nav->baseline_mm / disparity);
+            // if(disparity >= -1e-3 && disparity <= 1e-3){
+            //     cam_nav->depth_buffer[y*cam_nav->depth_width + x] = FLT_MAX;
+            // }else{
+            cam_nav->depth_buffer[y*cam_nav->depth_width + x] = (cam_nav->focal_length_pixels * (cam_nav->baseline_mm / disparity)) / cam_nav->max_depth_mm;
+            // }
 
         }
     }
@@ -397,7 +421,7 @@ inline bool cam_nav_process(cam_nav_t *cam_nav){
 
     cam_nav_calculate_depth(cam_nav);
 
-    if(cam_nav->on_depth_cb != NULL) cam_nav->on_depth_cb(cam_nav->depth_opaque_ptr, cam_nav->depth_buffer, cam_nav->depth_width, cam_nav->depth_height);
+    if(cam_nav->on_depth_cb != NULL) cam_nav->on_depth_cb(cam_nav->depth_opaque_ptr, cam_nav->depth_buffer, cam_nav->depth_width, cam_nav->depth_height, cam_nav->max_depth_mm);
 
     return true;
 }

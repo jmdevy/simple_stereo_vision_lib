@@ -16,9 +16,27 @@
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
-#include "../../../cam_nav.h"
+
+#include <stdarg.h>
 
 using namespace godot;
+
+//https://stackoverflow.com/a/20980016
+inline void osprintf(const char *fmt, ...){
+    va_list args;
+    char buf[1000];
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args );
+    va_end(args);
+    UtilityFunctions::print(buf);
+    // return buf;
+}
+
+#define CAM_NAV_PRINTF osprintf
+
+#include "../../../cam_nav.h"
+
+
 
 class CamNavDemoNode : public CharacterBody3D{
     GDCLASS(CamNavDemoNode, CharacterBody3D)
@@ -31,7 +49,6 @@ private:
     SubViewportContainer        *left_viewport_container = nullptr;
     SubViewport                 *left_viewport = nullptr;
     Camera3D                    *left_camera = nullptr;
-    godot::Ref<CameraAttributesPhysical> left_camera_physical_attribute;
     godot::Ref<ViewportTexture> left_texture;
     Node3D *left_origin;
 	Node3D *left_rotation_origin;
@@ -39,7 +56,6 @@ private:
     SubViewportContainer        *right_viewport_container = nullptr;
     SubViewport                 *right_viewport = nullptr;
     Camera3D                    *right_camera = nullptr;
-    godot::Ref<CameraAttributesPhysical> right_camera_physical_attribute;
     godot::Ref<ViewportTexture> right_texture;
     Node3D *right_origin;
 	Node3D *right_rotation_origin;
@@ -80,7 +96,7 @@ public:
     godot::Ref<Image>           depth_image;
 
     // How many units apart are the stereo eye origins
-    float baseline = 2.0f;
+    float baseline = 0.1f;
 
     void _ready();
 	void _process(float delta);

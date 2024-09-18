@@ -59,7 +59,7 @@ void on_disparity(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t 
 	// pixel using that since output texture is 8-bit
 	for(uint16_t y=0; y<disparity_width; y++){
 		for(uint16_t x=0; x<disparity_height; x++){
-			float magnitude = ((float)disparity_buffer[y*disparity_width + x] / (float)CAMERA_RESOLUTION);
+			float magnitude = ((float)disparity_buffer[y*disparity_width + x] / ((float)CAMERA_RESOLUTION));
 			disparity_image.ptr()->set_pixel(x, y, Color(magnitude, magnitude, magnitude));
 		}
 	}
@@ -69,7 +69,7 @@ void on_disparity(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t 
 }
 
 
-void on_depth(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height){
+void on_depth(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height, float max_depth_mm){
 	// Get the class instance back and make reference variables for
 	// texture and image for this side
 	CamNavDemoNode *instance = (CamNavDemoNode*)depth_opaque_ptr;
@@ -83,13 +83,21 @@ void on_depth(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width,
 	for(uint16_t y=0; y<depth_width; y++){
 		for(uint16_t x=0; x<depth_height; x++){
 			float magnitude = (float)depth_buffer[y*depth_width + x];
-			depth_image.ptr()->set_pixel(x, y, Color(magnitude, magnitude, magnitude));
+			if(magnitude >= max_depth_mm){
+				depth_image.ptr()->set_pixel(x, y, Color(1.0f, 0.0f, 0.0f));
+			}else{
+				depth_image.ptr()->set_pixel(x, y, Color(0.0f, magnitude, 0.0f));
+			}
+			
 		}
 	}
 
 	// Update the image to show it on screen
 	depth_texture.ptr()->set_image(depth_image);
 }
+
+
+
 
 
 void CamNavDemoNode::_bind_methods(){
@@ -118,16 +126,12 @@ void CamNavDemoNode::_ready(){
 	left_camera 			= memnew(Camera3D);
 	left_origin				= memnew(Node3D);
 	left_rotation_origin    = memnew(Node3D);
-	left_camera_physical_attribute.instantiate();
-	left_camera->set_attributes(left_camera_physical_attribute);
 
 	right_viewport_container = memnew(SubViewportContainer);
 	right_viewport 			 = memnew(SubViewport);
 	right_camera 			 = memnew(Camera3D);
 	right_origin			 = memnew(Node3D);
 	right_rotation_origin	 = memnew(Node3D);
-	right_camera_physical_attribute.instantiate();
-	right_camera->set_attributes(left_camera_physical_attribute);
 
 	// Add hierarchy of both eyes
 	call_deferred("add_child", left_viewport_container);
@@ -253,7 +257,7 @@ void CamNavDemoNode::_ready(){
 	disparity_image = Image::create(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, false, godot::Image::FORMAT_RH);
 	disparity_image.ptr()->fill(Color(1.0f, 1.0f, 0.0f));
 
-	depth_image = Image::create(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, false, godot::Image::FORMAT_RH);
+	depth_image = Image::create(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, false, godot::Image::FORMAT_RGF);
 	depth_image.ptr()->fill(Color(1.0f, 1.0f, 1.0f));
 
 	left_grayscale_texture.ptr()->set_image(left_grayscale_image);
@@ -267,7 +271,7 @@ void CamNavDemoNode::_ready(){
 	depth_texture_rect->set_texture(depth_texture);
 
 	// Create the cam_nav library instance
-	cam_nav = cam_nav_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, SEARCH_WINDOW_DIMENSIONS, baseline, left_camera_physical_attribute.ptr()->get_focal_length(), true);
+	cam_nav = cam_nav_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, SEARCH_WINDOW_DIMENSIONS, baseline*1000.0f, left_camera->get_fov(), true);
 
 	if(cam_nav == NULL){
 		UtilityFunctions::print("ERROR: Could not create cam_nav library! Likely an issue with search window not being a multiple of the width or height of the camera!");
