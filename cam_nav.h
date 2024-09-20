@@ -225,8 +225,8 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
     CAM_NAV_PRINTF("\t baseline (mm): \t\t\t\t\t\t%0.3f", cam_nav->baseline_mm);
     CAM_NAV_PRINTF("\t FOV (degrees): \t\t\t\t\t\t%0.3f", cam_nav->field_of_view_degrees);
     CAM_NAV_PRINTF("\t focal length (pixels): \t\t\t\t%0.3f", cam_nav->focal_length_pixels);
-    CAM_NAV_PRINTF("\t max depth (mm): \t\t\t\t\t%0.3f", cam_nav->max_depth_mm);
-    CAM_NAV_PRINTF("\t max depth (m): \t\t\t\t\t%0.3f", cam_nav->max_depth_mm/1000.0f);
+    CAM_NAV_PRINTF("\t max depth (mm): \t\t\t\t\t\t%0.3f", cam_nav->max_depth_mm);
+    CAM_NAV_PRINTF("\t max depth (m): \t\t\t\t\t\t%0.3f", cam_nav->max_depth_mm/1000.0f);
 
     return cam_nav;
 }
@@ -341,35 +341,67 @@ inline void cam_nav_convert_rgb656_to_grayscale(uint16_t *buffer, uint32_t pixel
 
 
 inline uint16_t cam_nav_disparity_search(cam_nav_t *cam_nav, uint16_t left_cell_x, uint16_t left_cell_y){
-    // Starting from same location in right eye, move left in right
-    // eye by a search window amount each time until reach end then
-    // calculate difference in x (disparity) for most similar block's
-    // x
-    uint16_t most_similar_block_x = left_cell_x;
+    // Starting from the same location in the right eye as the left eye,
+    // move window from right to left by a single pixel position amount
+    // starting at position from left eye
+    const uint16_t starting_x = left_cell_x * cam_nav->search_window_dimensions;
+    const uint16_t starting_y = left_cell_y * cam_nav->search_window_dimensions;
+
+    uint16_t most_similar_x = starting_x;
+    const uint16_t most_similar_y = starting_y;
     uint32_t smallest_difference = UINT32_MAX;
 
-    int32_t right_cell_y = left_cell_y;
-    for(int32_t right_cell_x=left_cell_x; right_cell_x>=0 && right_cell_x<=left_cell_x; right_cell_x--){
+    for(int32_t right_x=starting_x; right_x>=0 && right_x<=starting_x; right_x--){
         uint32_t current_difference = cam_nav->aggregate_pixel_comparer(cam_nav,
                                                         cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA],
                                                         cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA],
-                                                        left_cell_x*cam_nav->search_window_dimensions,
-                                                        left_cell_y*cam_nav->search_window_dimensions,
-                                                        right_cell_x*cam_nav->search_window_dimensions,
-                                                        right_cell_y*cam_nav->search_window_dimensions,
+                                                        starting_x,
+                                                        starting_y,
+                                                        right_x,
+                                                        starting_y,
                                                         cam_nav->search_window_dimensions);
         
         if(current_difference < smallest_difference){
             smallest_difference = current_difference;
-            most_similar_block_x = right_cell_x;
+            most_similar_x = right_x;
         }
     }
 
     // Now that we have the block X with the smallest difference to the one
     // in the left eye, calculate difference in X (disparity)
-    uint16_t left_abs_x = (float)(left_cell_x*cam_nav->search_window_dimensions);
-    uint16_t most_similar_abs_x = (float)(most_similar_block_x*cam_nav->search_window_dimensions);
-    return abs(left_abs_x - most_similar_abs_x);
+    return abs(starting_x - most_similar_x);
+
+
+
+    // // Starting from same location in right eye, move left in right
+    // // eye by a search window amount each time until reach end then
+    // // calculate difference in x (disparity) for most similar block's
+    // // x
+    // uint16_t most_similar_block_x = left_cell_x;
+    // uint32_t smallest_difference = UINT32_MAX;
+
+    // int32_t right_cell_y = left_cell_y;
+    // for(int32_t right_cell_x=left_cell_x; right_cell_x>=0 && right_cell_x<=left_cell_x; right_cell_x--){
+    //     uint32_t current_difference = cam_nav->aggregate_pixel_comparer(cam_nav,
+    //                                                     cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA],
+    //                                                     cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA],
+    //                                                     left_cell_x*cam_nav->search_window_dimensions,
+    //                                                     left_cell_y*cam_nav->search_window_dimensions,
+    //                                                     right_cell_x*cam_nav->search_window_dimensions,
+    //                                                     right_cell_y*cam_nav->search_window_dimensions,
+    //                                                     cam_nav->search_window_dimensions);
+        
+    //     if(current_difference < smallest_difference){
+    //         smallest_difference = current_difference;
+    //         most_similar_block_x = right_cell_x;
+    //     }
+    // }
+
+    // // Now that we have the block X with the smallest difference to the one
+    // // in the left eye, calculate difference in X (disparity)
+    // uint16_t left_abs_x = (float)(left_cell_x*cam_nav->search_window_dimensions);
+    // uint16_t most_similar_abs_x = (float)(most_similar_block_x*cam_nav->search_window_dimensions);
+    // return abs(left_abs_x - most_similar_abs_x);
 }
 
 

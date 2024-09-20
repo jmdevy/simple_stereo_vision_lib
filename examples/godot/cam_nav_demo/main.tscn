@@ -1,11 +1,24 @@
-[gd_scene load_steps=5 format=3 uid="uid://drhnu8mt1di0m"]
+[gd_scene load_steps=8 format=3 uid="uid://drhnu8mt1di0m"]
 
 [ext_resource type="Texture2D" uid="uid://4lbros11mkes" path="res://texture_cobble.png" id="1_gqr4q"]
 
+[sub_resource type="Gradient" id="Gradient_wadvy"]
+offsets = PackedFloat32Array(0, 0.37931, 1)
+colors = PackedColorArray(0, 0, 0, 1, 0.999999, 0.0536253, 0.490295, 1, 0.308183, 0.850045, 0.570515, 1)
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_6njj5"]
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_gv5vp"]
+width = 1024
+height = 1024
+in_3d_space = true
+seamless = true
+color_ramp = SubResource("Gradient_wadvy")
+noise = SubResource("FastNoiseLite_6njj5")
+
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_eqqp4"]
-albedo_texture = ExtResource("1_gqr4q")
-uv1_scale = Vector3(0.5, 0.5, 0.5)
-uv1_triplanar = true
+albedo_texture = SubResource("NoiseTexture2D_gv5vp")
+uv1_scale = Vector3(3, 3, 3)
 texture_filter = 0
 
 [sub_resource type="Environment" id="Environment_6nhf0"]
