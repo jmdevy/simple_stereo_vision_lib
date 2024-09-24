@@ -75,10 +75,10 @@ typedef struct cam_nav_t{
     uint32_t pixel_count;                       // Number of pixels in an individual camera
     uint32_t depth_cell_count;                  // Number of depth cells total after search window subdivision
     uint32_t frame_buffer_size;                 // Size, in bytes, of individual frame buffers
-    uint32_t depth_buffer_size;                 // Size, in bytes, of the depth buffer
+    uint32_t disparity_depth_buffer_size;       // Size, in bytes, of the depth buffer
 
     uint16_t *frame_buffers[2];                 // Frame buffers where raw 16-bit RGB565 frames are stored
-    float *depth_buffer;                        // Depth buffer where calculated depths from disparity map are stored
+    float *disparity_depth_buffer;              // Depth buffer where calculated depths from disparity map are stored
 
     uint32_t frame_buffers_amounts[2];          // When using `cam_nav_feed(...)`, tracks how much information is stored in corresponding `frame_buffers[...]`
 
@@ -94,7 +94,7 @@ typedef struct cam_nav_t{
     void (*on_disparity_cb)(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t disparity_width, uint16_t disparity_height);
 
     void *depth_opaque_ptr;
-    void (*on_depth_cb)(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height, float max_depth_mm);
+    void (*on_depth_cb)(void *depth_opaque_ptr, float *disparity_depth_buffer, uint16_t depth_width, uint16_t depth_height, float max_depth_mm);
 
     can_nav_status_t status_code;               // OK by default since 0 by default but gets set to any error code throughout the library
 }cam_nav_t;
@@ -174,7 +174,8 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
     cam_nav->focal_length_pixels = ((float)cam_nav->width*0.5f) / tanf(fov_degrees * 0.5f * 3.141593f/180.0f);
 
     // https://stackoverflow.com/a/19423059
-    cam_nav->max_depth_mm = cam_nav->focal_length_pixels * (cam_nav->baseline_mm / 1.0f);
+    // https://stackoverflow.com/a/75745742
+    cam_nav->max_depth_mm = cam_nav->focal_length_pixels * cam_nav->baseline_mm;
 
     cam_nav->grayscale_opaque_ptr = NULL;
     cam_nav->on_grayscale_cb = NULL;
@@ -198,7 +199,7 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
     // Calculate number of pixels and elements in frame and depth buffers
     cam_nav->pixel_count = cameras_width*cameras_height;
     cam_nav->frame_buffer_size = cam_nav->pixel_count * sizeof(uint16_t);
-    cam_nav->depth_buffer_size = cam_nav->depth_cell_count * sizeof(float);
+    cam_nav->disparity_depth_buffer_size = cam_nav->depth_cell_count * sizeof(float);
 
     // Stop here if user does not want cam_nav to make buffers
     if(allocate == false){
@@ -210,7 +211,7 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
     cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA] = (uint16_t*)CAM_NAV_MALLOC(cam_nav->frame_buffer_size);
 
     // Allocate space for the depth buffer
-    cam_nav->depth_buffer = (float*)CAM_NAV_MALLOC(cam_nav->depth_buffer_size);
+    cam_nav->disparity_depth_buffer = (float*)CAM_NAV_MALLOC(cam_nav->disparity_depth_buffer_size);
     
     // Indicate that the buffers are ready
     // and that these are *not* custom buffers
@@ -235,16 +236,16 @@ inline cam_nav_t *cam_nav_create(uint16_t cameras_width, uint16_t cameras_height
 // If `allocate` was set to `false` in call to `cam_nav_create`, use this function
 // to set the 2 frame buffers and 1 depth buffer to custom locations. Returns true
 // if set locations successfully, false if not because element count < pixel_count
-inline bool cam_nav_set_buffers(cam_nav_t *cam_nav, uint16_t *frame_buffers[], uint32_t frame_buffers_lengths, float *depth_buffer, uint32_t depth_buffer_length){
+inline bool cam_nav_set_buffers(cam_nav_t *cam_nav, uint16_t *frame_buffers[], uint32_t frame_buffers_lengths, float *disparity_depth_buffer, uint32_t disparity_depth_buffer_length){
     // Check that the buffers are long enough to store information for every camera pixel
-    if(frame_buffers_lengths < cam_nav->pixel_count || depth_buffer_length < cam_nav->pixel_count){
+    if(frame_buffers_lengths < cam_nav->pixel_count || disparity_depth_buffer_length < cam_nav->pixel_count){
         return false;
     }
 
     // Set the buffers to the user's custom locations
     cam_nav->frame_buffers[0] = frame_buffers[0];
     cam_nav->frame_buffers[1] = frame_buffers[1];
-    cam_nav->depth_buffer = depth_buffer;
+    cam_nav->disparity_depth_buffer = disparity_depth_buffer;
 
     // Buffers are ready and are custom (not do deallocate on deinit of library)
     cam_nav->buffers_set = true;
@@ -269,7 +270,7 @@ inline void cam_nav_set_on_disparity_cb(cam_nav_t *cam_nav,
 
 
 inline void cam_nav_set_on_depth_cb(cam_nav_t *cam_nav,
-                                    void (*on_depth_cb)(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width, uint16_t depth_height, float max_depth_mm),
+                                    void (*on_depth_cb)(void *depth_opaque_ptr, float *disparity_depth_buffer, uint16_t depth_width, uint16_t depth_height, float max_depth_mm),
                                     void *depth_opaque_ptr){
     cam_nav->on_depth_cb = on_depth_cb;
     cam_nav->depth_opaque_ptr = depth_opaque_ptr;
@@ -282,7 +283,7 @@ inline void cam_nav_destroy(cam_nav_t *cam_nav){
     if(cam_nav->buffers_set == true && cam_nav->custom_buffers_set == false){
         CAM_NAV_FREE(cam_nav->frame_buffers[0]);
         CAM_NAV_FREE(cam_nav->frame_buffers[1]);
-        CAM_NAV_FREE(cam_nav->depth_buffer);
+        CAM_NAV_FREE(cam_nav->disparity_depth_buffer);
     }
 
     // Always free this since allocated by library
@@ -344,10 +345,10 @@ inline uint16_t cam_nav_disparity_search(cam_nav_t *cam_nav, uint16_t left_cell_
     // Starting from the same location in the right eye as the left eye,
     // move window from right to left by a single pixel position amount
     // starting at position from left eye
-    const uint16_t starting_x = left_cell_x * cam_nav->search_window_dimensions;
+    const int32_t starting_x = left_cell_x * cam_nav->search_window_dimensions;
     const uint16_t starting_y = left_cell_y * cam_nav->search_window_dimensions;
 
-    uint16_t most_similar_x = starting_x;
+    int32_t most_similar_x = starting_x;
     const uint16_t most_similar_y = starting_y;
     uint32_t smallest_difference = UINT32_MAX;
 
@@ -369,39 +370,9 @@ inline uint16_t cam_nav_disparity_search(cam_nav_t *cam_nav, uint16_t left_cell_
 
     // Now that we have the block X with the smallest difference to the one
     // in the left eye, calculate difference in X (disparity)
-    return abs(starting_x - most_similar_x);
+    uint16_t disparity = abs(starting_x - most_similar_x);
 
-
-
-    // // Starting from same location in right eye, move left in right
-    // // eye by a search window amount each time until reach end then
-    // // calculate difference in x (disparity) for most similar block's
-    // // x
-    // uint16_t most_similar_block_x = left_cell_x;
-    // uint32_t smallest_difference = UINT32_MAX;
-
-    // int32_t right_cell_y = left_cell_y;
-    // for(int32_t right_cell_x=left_cell_x; right_cell_x>=0 && right_cell_x<=left_cell_x; right_cell_x--){
-    //     uint32_t current_difference = cam_nav->aggregate_pixel_comparer(cam_nav,
-    //                                                     cam_nav->frame_buffers[CAM_NAV_LEFT_CAMERA],
-    //                                                     cam_nav->frame_buffers[CAM_NAV_RIGHT_CAMERA],
-    //                                                     left_cell_x*cam_nav->search_window_dimensions,
-    //                                                     left_cell_y*cam_nav->search_window_dimensions,
-    //                                                     right_cell_x*cam_nav->search_window_dimensions,
-    //                                                     right_cell_y*cam_nav->search_window_dimensions,
-    //                                                     cam_nav->search_window_dimensions);
-        
-    //     if(current_difference < smallest_difference){
-    //         smallest_difference = current_difference;
-    //         most_similar_block_x = right_cell_x;
-    //     }
-    // }
-
-    // // Now that we have the block X with the smallest difference to the one
-    // // in the left eye, calculate difference in X (disparity)
-    // uint16_t left_abs_x = (float)(left_cell_x*cam_nav->search_window_dimensions);
-    // uint16_t most_similar_abs_x = (float)(most_similar_block_x*cam_nav->search_window_dimensions);
-    // return abs(left_abs_x - most_similar_abs_x);
+    return disparity;
 }
 
 
@@ -409,12 +380,14 @@ inline void cam_nav_calculate_depth(cam_nav_t *cam_nav){
     for(int32_t y=0; y<cam_nav->depth_height; y++){
         for(int32_t x=0; x<cam_nav->depth_width; x++){
 
-            float disparity = cam_nav->depth_buffer[y*cam_nav->depth_width + x];
-            // if(disparity >= -1e-3 && disparity <= 1e-3){
-            //     cam_nav->depth_buffer[y*cam_nav->depth_width + x] = FLT_MAX;
-            // }else{
-            cam_nav->depth_buffer[y*cam_nav->depth_width + x] = (cam_nav->focal_length_pixels * (cam_nav->baseline_mm / disparity)) / cam_nav->max_depth_mm;
-            // }
+            // Get the disparity and assign max depth if disparity close to zero
+            float disparity = cam_nav->disparity_depth_buffer[y*cam_nav->depth_width + x];
+            if(disparity >= 1.0f && disparity < cam_nav->width){
+                // Depth = focal_length_pixels * base_line_mm / disparity_pixels
+                cam_nav->disparity_depth_buffer[y*cam_nav->depth_width + x] = (cam_nav->focal_length_pixels * cam_nav->baseline_mm / disparity);
+            }else{
+                cam_nav->disparity_depth_buffer[y*cam_nav->depth_width + x] = cam_nav->max_depth_mm;
+            }
 
         }
     }
@@ -444,16 +417,15 @@ inline bool cam_nav_process(cam_nav_t *cam_nav){
         for(int32_t left_cell_x=0; left_cell_x<cam_nav->depth_width; left_cell_x++){
 
             uint16_t disparity = cam_nav_disparity_search(cam_nav, left_cell_x, left_cell_y);
-            cam_nav->depth_buffer[left_cell_y*cam_nav->depth_width + left_cell_x] = (float)disparity;
-
+            cam_nav->disparity_depth_buffer[left_cell_y*cam_nav->depth_width + left_cell_x] = (float)disparity;
         }
     }
 
-    if(cam_nav->on_disparity_cb != NULL) cam_nav->on_disparity_cb(cam_nav->disparity_opaque_ptr, cam_nav->depth_buffer, cam_nav->depth_width, cam_nav->depth_height);
+    if(cam_nav->on_disparity_cb != NULL) cam_nav->on_disparity_cb(cam_nav->disparity_opaque_ptr, cam_nav->disparity_depth_buffer, cam_nav->depth_width, cam_nav->depth_height);
 
     cam_nav_calculate_depth(cam_nav);
 
-    if(cam_nav->on_depth_cb != NULL) cam_nav->on_depth_cb(cam_nav->depth_opaque_ptr, cam_nav->depth_buffer, cam_nav->depth_width, cam_nav->depth_height, cam_nav->max_depth_mm);
+    if(cam_nav->on_depth_cb != NULL) cam_nav->on_depth_cb(cam_nav->depth_opaque_ptr, cam_nav->disparity_depth_buffer, cam_nav->depth_width, cam_nav->depth_height, cam_nav->max_depth_mm);
 
     return true;
 }
@@ -490,6 +462,12 @@ inline bool cam_nav_feed(void *cam_nav_instance, cam_nav_camera_side side, const
     }
 
     return true;
+}
+
+
+inline float cam_nav_get_max_depth_mm(void *cam_nav_instance){
+    cam_nav_t *cam_nav = (cam_nav_t*)cam_nav_instance;
+    return cam_nav->max_depth_mm;
 }
 
 

@@ -59,8 +59,6 @@ private:
     godot::Ref<ViewportTexture> right_texture;
     Node3D *right_origin;
 	Node3D *right_rotation_origin;
-
-    cam_nav_t *cam_nav = nullptr;
 protected:
     static void _bind_methods();
 public:
@@ -94,6 +92,8 @@ public:
     TextureRect                 *depth_texture_rect;
     godot::Ref<ImageTexture>    depth_texture;
     godot::Ref<Image>           depth_image;
+
+    cam_nav_t *cam_nav = nullptr;
 
     // How many units apart are the stereo eye origins
     float baseline = 0.1f;

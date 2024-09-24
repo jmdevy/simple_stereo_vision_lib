@@ -59,7 +59,7 @@ void on_disparity(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t 
 	// pixel using that since output texture is 8-bit
 	for(uint16_t y=0; y<disparity_width; y++){
 		for(uint16_t x=0; x<disparity_height; x++){
-			float magnitude = ((float)disparity_buffer[y*disparity_width + x] / ((float)CAMERA_RESOLUTION));
+			float magnitude = ((float)disparity_buffer[y*disparity_width + x] / ((float)CAMERA_RESOLUTION)) * 20.0f;
 			disparity_image.ptr()->set_pixel(x, y, Color(magnitude, magnitude, magnitude));
 		}
 	}
@@ -82,11 +82,13 @@ void on_depth(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width,
 	// pixel using that since output texture is 8-bit
 	for(uint16_t y=0; y<depth_width; y++){
 		for(uint16_t x=0; x<depth_height; x++){
-			float magnitude = (float)depth_buffer[y*depth_width + x];
-			if(magnitude >= max_depth_mm){
-				depth_image.ptr()->set_pixel(x, y, Color(1.0f, 0.0f, 0.0f));
+			float max_depth_mm = cam_nav_get_max_depth_mm(instance->cam_nav);
+			float depth_mm = (float)depth_buffer[y*depth_width + x];
+
+			if(depth_mm >= max_depth_mm){
+				depth_image.ptr()->set_pixel(x, y, Color(0.0f, 0.0f, 0.0f));
 			}else{
-				depth_image.ptr()->set_pixel(x, y, Color(0.0f, magnitude, 0.0f));
+				depth_image.ptr()->set_pixel(x, y, Color(0.0f, depth_mm/max_depth_mm, 0.0f));
 			}
 			
 		}
@@ -254,7 +256,7 @@ void CamNavDemoNode::_ready(){
 	right_grayscale_image = Image::create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, false, godot::Image::FORMAT_L8);
 	right_grayscale_image.ptr()->fill(Color(1.0f, 1.0f, 0.0f));
 
-	disparity_image = Image::create(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, false, godot::Image::FORMAT_RH);
+	disparity_image = Image::create(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, false, godot::Image::FORMAT_RF);
 	disparity_image.ptr()->fill(Color(1.0f, 1.0f, 0.0f));
 
 	depth_image = Image::create(CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, CAMERA_RESOLUTION/SEARCH_WINDOW_DIMENSIONS, false, godot::Image::FORMAT_RGF);
