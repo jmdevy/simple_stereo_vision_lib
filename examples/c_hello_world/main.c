@@ -1,10 +1,10 @@
-#include "../../cam_nav.h"
+#include "../../simple_stereo_vision_lib.h"
 
-void *cam_nav = NULL;
+void *ssvl = NULL;
 
 int main(int argc, char* argv[]){
 
-    cam_nav = cam_nav_create(128, 128, true);
+    ssvl = ssvl_create(128, 128, true);
 
     return 0;
 }

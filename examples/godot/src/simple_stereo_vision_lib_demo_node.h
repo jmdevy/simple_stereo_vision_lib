@@ -1,5 +1,5 @@
-#ifndef CAM_NAV_DEMO_NODE_H
-#define CAM_NAV_DEMO_NODE_H
+#ifndef SIMPLE_STEREO_VISION_LIB_DEMO_NODE_H
+#define SIMPLE_STEREO_VISION_LIB_DEMO_NODE_H
 
 
 #include <godot_cpp/classes/character_body3d.hpp>
@@ -32,9 +32,9 @@ inline void osprintf(const char *fmt, ...){
     // return buf;
 }
 
-#define CAM_NAV_PRINTF osprintf
+#define SSVL_PRINTF osprintf
 
-#include "../../../cam_nav.h"
+#include "../../../simple_stereo_vision_lib.h"
 
 
 
@@ -93,7 +93,7 @@ public:
     godot::Ref<ImageTexture>    depth_texture;
     godot::Ref<Image>           depth_image;
 
-    cam_nav_t *cam_nav = nullptr;
+    ssvl_t *ssvl = nullptr;
 
     // How many units apart are the stereo eye origins
     float baseline = 0.1f;
@@ -117,4 +117,4 @@ public:
 };
 
 
-#endif  // CAM_NAV_DEMO_NODE_H
+#endif  // SIMPLE_STEREO_VISION_LIB_DEMO_NODE_H

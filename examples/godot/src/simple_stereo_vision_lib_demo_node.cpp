@@ -1,4 +1,4 @@
-#include "cam_nav_demo_node.h"
+#include "simple_stereo_vision_lib_demo_node.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -11,10 +11,10 @@
 using namespace godot;
 
 
-// Debug function that can be invoked by `cam_nav` just
+// Debug function that can be invoked by `ssvl` just
 // after the input feed frames are converted to grayscale.
 // This is just for debugging.
-void on_grayscale(void *grayscale_opaque_ptr, cam_nav_camera_side side, uint16_t *grayscale_frame_buffer, uint16_t pixel_width, uint16_t pixel_height){
+void on_grayscale(void *grayscale_opaque_ptr, ssvl_camera_side side, uint16_t *grayscale_frame_buffer, uint16_t pixel_width, uint16_t pixel_height){
 	// Get the class instance back and make reference variables for
 	// texture and image for this side
 	CamNavDemoNode *instance = (CamNavDemoNode*)grayscale_opaque_ptr;
@@ -22,7 +22,7 @@ void on_grayscale(void *grayscale_opaque_ptr, cam_nav_camera_side side, uint16_t
     godot::Ref<Image>           grayscale_image;
 	
 	// Determine the side
-	if(side == CAM_NAV_LEFT_CAMERA){
+	if(side == SSVL_LEFT_CAMERA){
 		grayscale_texture = instance->left_grayscale_texture;
 		grayscale_image = instance->left_grayscale_image;
 	}else{
@@ -31,7 +31,7 @@ void on_grayscale(void *grayscale_opaque_ptr, cam_nav_camera_side side, uint16_t
 	}
 
 	// For each incoming grayscale single component value
-	// from `cam_nav`, get it and convert it from 16-bit
+	// from `ssvl`, get it and convert it from 16-bit
 	// int luminance to 0.0 ~ 1.0 luminance and then set
 	// pixel using that since output texture is 8-bit
 	for(uint16_t y=0; y<pixel_height; y++){
@@ -54,7 +54,7 @@ void on_disparity(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t 
     godot::Ref<Image>           disparity_image = instance->disparity_image;
 
 	// For each incoming grayscale single component value
-	// from `cam_nav`, get it and convert it from 16-bit
+	// from `ssvl`, get it and convert it from 16-bit
 	// int luminance to 0.0 ~ 1.0 luminance and then set
 	// pixel using that since output texture is 8-bit
 	for(uint16_t y=0; y<disparity_width; y++){
@@ -77,12 +77,12 @@ void on_depth(void *depth_opaque_ptr, float *depth_buffer, uint16_t depth_width,
     godot::Ref<Image>           depth_image = instance->depth_image;
 
 	// For each incoming grayscale single component value
-	// from `cam_nav`, get it and convert it from 16-bit
+	// from `ssvl`, get it and convert it from 16-bit
 	// int luminance to 0.0 ~ 1.0 luminance and then set
 	// pixel using that since output texture is 8-bit
 	for(uint16_t y=0; y<depth_width; y++){
 		for(uint16_t x=0; x<depth_height; x++){
-			float max_depth_mm = cam_nav_get_max_depth_mm(instance->cam_nav);
+			float max_depth_mm = ssvl_get_max_depth_mm(instance->ssvl);
 			float depth_mm = (float)depth_buffer[y*depth_width + x];
 
 			if(depth_mm >= max_depth_mm){
@@ -171,7 +171,7 @@ void CamNavDemoNode::_ready(){
 	left_camera->set_position(Vector3(-baseline/2.0f, 0.0, 0.0));
 	right_camera->set_position(Vector3(baseline/2.0f, 0.0, 0.0));
 
-	// Get textures and images that will be fed into cam_nav every tick
+	// Get textures and images that will be fed into ssvl every tick
 	left_texture = left_viewport->get_texture();
 	right_texture = right_viewport->get_texture();
 
@@ -272,16 +272,16 @@ void CamNavDemoNode::_ready(){
 	disparity_texture_rect->set_texture(disparity_texture);
 	depth_texture_rect->set_texture(depth_texture);
 
-	// Create the cam_nav library instance
-	cam_nav = cam_nav_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, SEARCH_WINDOW_DIMENSIONS, baseline*1000.0f, left_camera->get_fov(), true);
+	// Create the ssvl library instance
+	ssvl = ssvl_create(CAMERA_RESOLUTION, CAMERA_RESOLUTION, SEARCH_WINDOW_DIMENSIONS, baseline*1000.0f, left_camera->get_fov(), true);
 
-	if(cam_nav == NULL){
-		UtilityFunctions::print("ERROR: Could not create cam_nav library! Likely an issue with search window not being a multiple of the width or height of the camera!");
+	if(ssvl == NULL){
+		UtilityFunctions::print("ERROR: Could not create ssvl library! Likely an issue with search window not being a multiple of the width or height of the camera!");
 	}
 
-	cam_nav_set_on_grayscale_cb(cam_nav, on_grayscale, this);
-	cam_nav_set_on_disparity_cb(cam_nav, on_disparity, this);
-	cam_nav_set_on_depth_cb(cam_nav, on_depth, this);
+	ssvl_set_on_grayscale_cb(ssvl, on_grayscale, this);
+	ssvl_set_on_disparity_cb(ssvl, on_disparity, this);
+	ssvl_set_on_depth_cb(ssvl, on_depth, this);
 }
 
 
@@ -295,7 +295,7 @@ void CamNavDemoNode::_process(float delta){
 		return;
 	}
 
-	// Get eye images and convert to pixel format cam_nav uses
+	// Get eye images and convert to pixel format ssvl uses
 	godot::Ref<Image> left_image = left_texture.ptr()->get_image();
 	godot::Ref<Image> right_image = right_texture.ptr()->get_image();
 
@@ -305,13 +305,13 @@ void CamNavDemoNode::_process(float delta){
 	PackedByteArray left_byte_array = left_image.ptr()->get_data();
 	PackedByteArray right_byte_array = right_image.ptr()->get_data();
 
-	// Feed and process frames in `cam_nav`
-	if(cam_nav_feed(cam_nav, CAM_NAV_LEFT_CAMERA, left_byte_array.ptr(), left_byte_array.size()) == false){
-		UtilityFunctions::print("ERROR: Too much data for left cam_nav eye!");
+	// Feed and process frames in `ssvl`
+	if(ssvl_feed(ssvl, SSVL_LEFT_CAMERA, left_byte_array.ptr(), left_byte_array.size()) == false){
+		UtilityFunctions::print("ERROR: Too much data for left ssvl eye!");
 	}
 
-	if(cam_nav_feed(cam_nav, CAM_NAV_RIGHT_CAMERA, right_byte_array.ptr(), right_byte_array.size()) == false){
-		UtilityFunctions::print("ERROR: Too much data for right cam_nav eye!");
+	if(ssvl_feed(ssvl, SSVL_RIGHT_CAMERA, right_byte_array.ptr(), right_byte_array.size()) == false){
+		UtilityFunctions::print("ERROR: Too much data for right ssvl eye!");
 	}
 }
 
