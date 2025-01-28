@@ -5,7 +5,10 @@ import * as THREE from 'three'
 import React, { useEffect, useRef, useState } from 'react'
 import { Theme } from "react-daisyui";
 import { Canvas, createPortal, useFrame, useThree } from '@react-three/fiber'
-import { Stats, OrbitControls, useFBO, PerspectiveCamera, OrthographicCamera, Plane, shaderMaterial, Box } from '@react-three/drei'
+import { Stats, OrbitControls, useFBO, PerspectiveCamera, OrthographicCamera, Plane, shaderMaterial, Box, useGLTF } from '@react-three/drei'
+import { ForwardRefComponent } from "@react-three/drei/helpers/ts-utils";
+import Player from "./player";
+
 
 // Create an object with keys as strings and mostly any type of value
 interface Props{
@@ -13,9 +16,16 @@ interface Props{
 }
 
 
+
+function SceneModel(){
+    const { scene } = useGLTF('/assets/models/scene.glb'); // Replace with your model path
+    return <primitive object={scene} />;
+}
+
+
 function Render(props: Props){
-    const leftCameraFrameBuffer = useFBO(window.innerWidth, window.innerHeight, {format:THREE.RGBAFormat, type:THREE.UnsignedByteType});
-    const rightCameraFrameBuffer = useFBO(window.innerWidth, window.innerHeight, {format:THREE.RGBAFormat, type:THREE.UnsignedByteType});
+    const leftCameraFrameBuffer = useFBO(window.innerWidth, window.innerHeight, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType });
+    const rightCameraFrameBuffer = useFBO(window.innerWidth, window.innerHeight, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType });
 
     const guiScene = new THREE.Scene();
     const guiCamera = React.useRef();
@@ -31,12 +41,12 @@ function Render(props: Props){
         gl.setRenderTarget(leftCameraFrameBuffer);
         gl.clear(true);
         gl.render(scene, props.leftCamera.current);
-    
+
         /** Render scene from camera B to a different render target */
         gl.setRenderTarget(rightCameraFrameBuffer);
         gl.clear(true);
         gl.render(scene, props.rightCamera.current);
-    
+
         // render main scene
         scene.overrideMaterial = null;
         gl.setRenderTarget(null);
@@ -46,92 +56,106 @@ function Render(props: Props){
         gl.render(guiScene, guiCamera.current);
 
         gl.autoClear = true;
+
+        gl.readRenderTargetPixels(leftCameraFrameBuffer, 0, 0, window.innerWidth, window.innerHeight, )
     }, 1);
 
     return createPortal(
         <>
-          <OrthographicCamera ref={guiCamera} near={0.0001} far={1} />
-    
-          <group position-x={-window.innerWidth/4} position-y={0} position-z={-0.1}>
-            <Plane args={[window.innerWidth/2, window.innerHeight, 1]} position-y={0}>
-              <meshBasicMaterial map={leftCameraFrameBuffer.texture} />
-            </Plane>
-    
-            <Plane args={[window.innerWidth/2, window.innerHeight, 1]} position-x={window.innerWidth/2}>
-              <meshBasicMaterial map={rightCameraFrameBuffer.texture} />
-            </Plane>
-          </group>
+            <OrthographicCamera ref={guiCamera} near={0.0001} far={1} />
+
+            <group position-x={-window.innerWidth / 4} position-y={0} position-z={-0.1}>
+                <Plane args={[window.innerWidth / 2, window.innerHeight, 1]} position-y={0}>
+                    <meshBasicMaterial map={leftCameraFrameBuffer.texture} />
+                </Plane>
+
+                <Plane args={[window.innerWidth / 2, window.innerHeight, 1]} position-x={window.innerWidth / 2}>
+                    <meshBasicMaterial map={rightCameraFrameBuffer.texture} />
+                </Plane>
+            </group>
         </>,
         guiScene
-      )
+    )
 }
 
 
-export default function Home() {
-  let stereoParent = useRef();
-  let leftCamera = useRef();
-  let rightCamera = useRef();
-  
-  const baseline = 10.0;
+export default function Home(){
+    let stereoParent = useRef<typeof Box>(null);
+    let leftCamera = useRef();
+    let rightCamera = useRef();
+
+    const baseline = 10.0;
 
 
-  useEffect(() => {
-    const waitForScene = async () => {
-      return new Promise((resolve, reject) => {
-        const cb = () => {
-          if(leftCamera.current != undefined && rightCamera.current != undefined){
-            resolve();
-          }else{
-            setTimeout(cb, 10);
-          }
+    useEffect(() => {
+        const waitForScene = async () => {
+            return new Promise((resolve, reject) => {
+                const cb = () => {
+                    if (leftCamera.current != undefined && rightCamera.current != undefined) {
+                        resolve(true);
+                    } else {
+                        setTimeout(cb, 10);
+                    }
+                }
+
+                cb();
+            });
         }
 
-        cb();
-      });
-    }
+        waitForScene().then(() => {
+            if(stereoParent.current == null){
+                return;
+            }
 
-    waitForScene().then(() => {
-      stereoParent.current.attach(leftCamera.current);
-      stereoParent.current.attach(rightCamera.current);
-      stereoParent.current.translateY(2);
-      stereoParent.current.translateZ(8);
-    });
+            stereoParent.current.attach(leftCamera.current);
+            stereoParent.current.attach(rightCamera.current);
+            stereoParent.current.translateY(2);
+            stereoParent.current.translateZ(8);
+        });
 
-    document.addEventListener("keydown", (event) => {
-      if(event.code == "KeyA"){
-        stereoParent.current.translateX(-0.5);
-      }else if(event.code == "KeyD"){
-        stereoParent.current.translateX(0.5);
-      }else if(event.code == "KeyW"){
-        stereoParent.current.translateZ(0.5);
-      }else if(event.code == "KeyS"){
-        stereoParent.current.translateZ(-0.5);
-      }
-    })
-  }, []);
+        document.addEventListener("keydown", (event) => {
+            if(stereoParent.current == null){
+                return;
+            }
 
-  // There are three cameras in the scene:
-  // 1. Default (`Canvas` creates one)
-  // 2. Left    (Created for stereo vision)
-  // 3. Right   (Created for stereo vision)
-  return (
-      <Theme dataTheme="dim" className="absolute left-0 right-0 top-0 bottom-0 flex">
-          <Canvas camera={{position: [0, 5, 20]}}>
-            {/* Stereo pair */}
-            <Box ref={stereoParent} visible={true} position={[0, 0, 0]} />
-            <PerspectiveCamera ref={leftCamera} position={[-baseline/2, 0, 0]} />
-            <PerspectiveCamera ref={rightCamera} position={[baseline/2, 0, 0]} />
+            if (event.code == "KeyA") {
+                stereoParent.current.translateX(-0.5);
+            } else if (event.code == "KeyD") {
+                stereoParent.current.translateX(0.5);
+            } else if (event.code == "KeyW") {
+                stereoParent.current.translateZ(0.5);
+            } else if (event.code == "KeyS") {
+                stereoParent.current.translateZ(-0.5);
+            }
+        });
 
-            <ambientLight intensity={Math.PI / 2} />
-            <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} decay={0} intensity={Math.PI} />
-            <pointLight position={[-10, -10, -10]} decay={0} intensity={Math.PI} />
-            <gridHelper args={[40, 40, 0xff0000, 'teal']} />
-            <Box position={[0, 0, -10]} />
+        document.addEventListener("mousemove", (event) => {
+            console.log(event);
 
-            <Render leftCamera={leftCamera} rightCamera={rightCamera}/>
+        });
+    }, []);
 
-            <OrbitControls />
-          </Canvas>,
-      </Theme>
-  );
+    // There are three cameras in the scene:
+    // 1. Default (`Canvas` creates one)
+    // 2. Left    (Created for stereo vision)
+    // 3. Right   (Created for stereo vision)
+    return(
+        <Theme dataTheme="dim" className="absolute left-0 right-0 top-0 bottom-0 flex">
+            <Canvas camera={{ position: [0, 5, 20] }}>
+                {/* Stereo pair */}
+                <Box ref={stereoParent} visible={true} position={[0, 0, 0]} />
+                <PerspectiveCamera ref={leftCamera} position={[-baseline / 2, 0, 0]} />
+                <PerspectiveCamera ref={rightCamera} position={[baseline / 2, 0, 0]} />
+
+                <ambientLight intensity={Math.PI/2} />
+                <pointLight position={[-10, -10, -10]} decay={0} intensity={Math.PI} />
+                <SceneModel />
+
+                <Render leftCamera={leftCamera} rightCamera={rightCamera} />
+                <Player/>
+
+                <OrbitControls />
+            </Canvas>,
+        </Theme>
+    );
 }
