@@ -2,3 +2,6 @@
 	path = examples/godot/godot-cpp
 	url = https://github.com/godotengine/godot-cpp
 	branch = 4.3
+[submodule "examples/c/stb"]
+	path = examples/c/stb
+	url = https://github.com/nothings/stb.git

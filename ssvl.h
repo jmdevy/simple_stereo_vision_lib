@@ -8,6 +8,7 @@
 #include <string.h>
 #include <math.h>
 #include <float.h>
+#include <inttypes.h>
 
 
 // On some platforms, it is required to store large buffers
@@ -24,6 +25,13 @@
 #ifndef SSVL_PRINTF
 #define SSVL_PRINTF printf
 #endif
+
+// Function definition other than the return type
+#ifndef SSVL_FUNC
+#define SSVL_FUNC extern inline
+#endif
+
+// NOTE: Use `#define SSVL_DEBUG` to enable printing, disabled by not being defined by default
 
 
 // Used throughout library to refer to which camera to interact with
@@ -63,7 +71,7 @@ typedef struct ssvl_t{
     // in the passed window location and
     // dimensions in the original and compare
     // buffers
-    uint32_t (*aggregate_pixel_comparer)(ssvl_t *ssvl,
+    uint32_t (*aggregate_pixel_comparer)(struct ssvl_t *ssvl,
                                       uint16_t *original_cam_buffer,
                                       uint16_t *compare_cam_buffer,
                                       uint16_t original_window_x,
@@ -105,12 +113,12 @@ typedef struct ssvl_t{
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
 // Used internally to set library status when a error occurs
-inline void ssvl_set_status_code(ssvl_t *ssvl, ssvl_status_t status_code){
+SSVL_FUNC void ssvl_set_status_code(ssvl_t *ssvl, ssvl_status_t status_code){
     ssvl->status_code = status_code;
 }
 
 
-inline ssvl_status_t ssvl_get_status_code(ssvl_t *ssvl){
+SSVL_FUNC ssvl_status_t ssvl_get_status_code(ssvl_t *ssvl){
     return ssvl->status_code;
 }
 
@@ -120,7 +128,7 @@ inline ssvl_status_t ssvl_get_status_code(ssvl_t *ssvl){
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
 // https://johnwlambert.github.io/stereo/
-inline uint32_t ssvl_sad_comparer(ssvl_t *ssvl, uint16_t *original_cam_buffer, uint16_t *compare_cam_buffer,
+SSVL_FUNC uint32_t ssvl_sad_comparer(ssvl_t *ssvl, uint16_t *original_cam_buffer, uint16_t *compare_cam_buffer,
                                                uint16_t original_window_x, uint16_t original_window_y,
                                                uint16_t compare_window_x, uint16_t compare_window_y,
                                                uint8_t window_dimensions){
@@ -145,20 +153,17 @@ inline uint32_t ssvl_sad_comparer(ssvl_t *ssvl, uint16_t *original_cam_buffer, u
 //         LIBRARY SETUP AND STOPPING
 // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 
-// Create and initialize the `ssvl` library - store the returned pointer in your program. Allocates:
+// Initialize the `ssvl` library - store the returned pointer in your program. Allocates:
 //  * 2 16-bit cameras_width*cameras_height frame buffers = 2*2*cameras_width*cameras_height bytes
 //  * 1 32-bit/float calculated depth buffer = 4*cameras_width*cameras_height bytes bytes
 //
 // Set `allocate` to `true` if the library should allocate frame and depth buffers, otherwise, set
 // false if you're going to call `ssvl_set_buffers` to reuse memory you may already have allocated
-inline ssvl_t *ssvl_create(uint16_t cameras_width, uint16_t cameras_height, uint8_t search_window_dimensions, float baseline_mm, float fov_degrees, bool allocate){
-    // Create the library instance for the user to store and re-use
-    ssvl_t *ssvl = (ssvl_t*)SSVL_MALLOC(sizeof(ssvl_t));
-
+SSVL_FUNC void ssvl_init(ssvl_t *ssvl, uint16_t cameras_width, uint16_t cameras_height, uint8_t search_window_dimensions, float baseline_mm, float fov_degrees, bool allocate){
     // if search window square dimensions are not a multiple of the
     // width or height, return NULL and do not create library instance
     if(cameras_width & search_window_dimensions != 0 || cameras_height % search_window_dimensions != 0){
-        return NULL;
+        return;
     }
 
     // Track these for later usage
@@ -203,12 +208,14 @@ inline ssvl_t *ssvl_create(uint16_t cameras_width, uint16_t cameras_height, uint
 
     // Stop here if user does not want ssvl to make buffers
     if(allocate == false){
-        return ssvl;
+        return;
     }
 
     // Allocate space for the individual camera frame buffers
     ssvl->frame_buffers[SSVL_LEFT_CAMERA] = (uint16_t*)SSVL_MALLOC(ssvl->frame_buffer_size);
     ssvl->frame_buffers[SSVL_RIGHT_CAMERA] = (uint16_t*)SSVL_MALLOC(ssvl->frame_buffer_size);
+    ssvl->frame_buffers_amounts[SSVL_LEFT_CAMERA] = 0;
+    ssvl->frame_buffers_amounts[SSVL_RIGHT_CAMERA] = 0;
 
     // Allocate space for the depth buffer
     ssvl->disparity_depth_buffer = (float*)SSVL_MALLOC(ssvl->disparity_depth_buffer_size);
@@ -219,24 +226,25 @@ inline ssvl_t *ssvl_create(uint16_t cameras_width, uint16_t cameras_height, uint
     ssvl->buffers_set = true;
     ssvl->custom_buffers_set = false;
 
-    SSVL_PRINTF("SSVL:");
-    SSVL_PRINTF("\t width (pixels): \t\t\t\t\t\t%d", ssvl->width);
-    SSVL_PRINTF("\t height (pixels): \t\t\t\t\t\t%d", ssvl->height);
-    SSVL_PRINTF("\t search_window_dimensions (pixels): \t%d", ssvl->search_window_dimensions);
-    SSVL_PRINTF("\t baseline (mm): \t\t\t\t\t\t%0.3f", ssvl->baseline_mm);
-    SSVL_PRINTF("\t FOV (degrees): \t\t\t\t\t\t%0.3f", ssvl->field_of_view_degrees);
-    SSVL_PRINTF("\t focal length (pixels): \t\t\t\t%0.3f", ssvl->focal_length_pixels);
-    SSVL_PRINTF("\t max depth (mm): \t\t\t\t\t\t%0.3f", ssvl->max_depth_mm);
-    SSVL_PRINTF("\t max depth (m): \t\t\t\t\t\t%0.3f", ssvl->max_depth_mm/1000.0f);
-
-    return ssvl;
+    #if defined(SSVL_DEBUG)
+        SSVL_PRINTF("SSVL:");
+        SSVL_PRINTF("\t width (pixels): \t\t\t\t\t\t%d\n", ssvl->width);
+        SSVL_PRINTF("\t height (pixels): \t\t\t\t\t\t%d\n", ssvl->height);
+        SSVL_PRINTF("\t search_window_dimensions (pixels): \t\t\t\t%d\n", ssvl->search_window_dimensions);
+        SSVL_PRINTF("\t baseline (mm): \t\t\t\t\t\t%0.3f\n", ssvl->baseline_mm);
+        SSVL_PRINTF("\t FOV (degrees): \t\t\t\t\t\t%0.3f\n", ssvl->field_of_view_degrees);
+        SSVL_PRINTF("\t focal length (pixels): \t\t\t\t\t%0.3f\n", ssvl->focal_length_pixels);
+        SSVL_PRINTF("\t max depth (mm): \t\t\t\t\t\t%0.3f\n", ssvl->max_depth_mm);
+        SSVL_PRINTF("\t max depth (m): \t\t\t\t\t\t%0.3f\n", ssvl->max_depth_mm/1000.0f);
+        SSVL_PRINTF("\t frame buffer size (bytes): \t\t\t\t\t%d\n", ssvl->frame_buffer_size);
+    #endif
 }
 
 
-// If `allocate` was set to `false` in call to `ssvl_create`, use this function
+// If `allocate` was set to `false` in call to `ssvl_init`, use this function
 // to set the 2 frame buffers and 1 depth buffer to custom locations. Returns true
 // if set locations successfully, false if not because element count < pixel_count
-inline bool ssvl_set_buffers(ssvl_t *ssvl, uint16_t *frame_buffers[], uint32_t frame_buffers_lengths, float *disparity_depth_buffer, uint32_t disparity_depth_buffer_length){
+SSVL_FUNC bool ssvl_set_buffers(ssvl_t *ssvl, uint16_t *frame_buffers[], uint32_t frame_buffers_lengths, float *disparity_depth_buffer, uint32_t disparity_depth_buffer_length){
     // Check that the buffers are long enough to store information for every camera pixel
     if(frame_buffers_lengths < ssvl->pixel_count || disparity_depth_buffer_length < ssvl->pixel_count){
         return false;
@@ -253,7 +261,7 @@ inline bool ssvl_set_buffers(ssvl_t *ssvl, uint16_t *frame_buffers[], uint32_t f
 }
 
 
-inline void ssvl_set_on_grayscale_cb(ssvl_t *ssvl,
+SSVL_FUNC void ssvl_set_on_grayscale_cb(ssvl_t *ssvl,
                                         void (*on_grayscale_cb)(void *grayscale_opaque_ptr, ssvl_camera_side side, uint16_t *grayscale_frame_buffer, uint16_t pixel_width, uint16_t pixel_height),
                                         void *grayscale_opaque_ptr){
     ssvl->on_grayscale_cb = on_grayscale_cb;
@@ -261,7 +269,7 @@ inline void ssvl_set_on_grayscale_cb(ssvl_t *ssvl,
 }
 
 
-inline void ssvl_set_on_disparity_cb(ssvl_t *ssvl,
+SSVL_FUNC void ssvl_set_on_disparity_cb(ssvl_t *ssvl,
                                         void (*on_disparity_cb)(void *disparity_opaque_ptr, float *disparity_buffer, uint16_t disparity_width, uint16_t disparity_height),
                                         void *disparity_opaque_ptr){
     ssvl->on_disparity_cb = on_disparity_cb;
@@ -269,7 +277,7 @@ inline void ssvl_set_on_disparity_cb(ssvl_t *ssvl,
 }
 
 
-inline void ssvl_set_on_depth_cb(ssvl_t *ssvl,
+SSVL_FUNC void ssvl_set_on_depth_cb(ssvl_t *ssvl,
                                     void (*on_depth_cb)(void *depth_opaque_ptr, float *disparity_depth_buffer, uint16_t depth_width, uint16_t depth_height, float max_depth_mm),
                                     void *depth_opaque_ptr){
     ssvl->on_depth_cb = on_depth_cb;
@@ -277,17 +285,15 @@ inline void ssvl_set_on_depth_cb(ssvl_t *ssvl,
 }
 
 
-// Give back the memory for various buffers
-inline void ssvl_destroy(ssvl_t *ssvl){
+// Give back the memory for various buffers,
+// does not deallocate `ssvl_t` structure
+SSVL_FUNC void ssvl_destroy(ssvl_t *ssvl){
     // Only deallocate buffers if they are set and not custom
     if(ssvl->buffers_set == true && ssvl->custom_buffers_set == false){
         SSVL_FREE(ssvl->frame_buffers[0]);
         SSVL_FREE(ssvl->frame_buffers[1]);
         SSVL_FREE(ssvl->disparity_depth_buffer);
     }
-
-    // Always free this since allocated by library
-    SSVL_FREE(ssvl);
 
     // Reset flags
     ssvl->buffers_set = false;
@@ -301,7 +307,7 @@ inline void ssvl_destroy(ssvl_t *ssvl){
 
 // Converts 16-bit RGB565 to 16-bit grayscale
 // https://en.wikipedia.org/wiki/Grayscale#:~:text=Ylinear%2C-,which%20is%20given%20by,-%5B6%5D
-inline void ssvl_convert_rgb656_to_grayscale(uint16_t *buffer, uint32_t pixel_count){
+SSVL_FUNC void ssvl_convert_rgb565_to_grayscale(uint16_t *buffer, uint32_t pixel_count){
     // Masks for bits for each color channel
     const uint16_t r_mask = 0b1111100000000000;
     const uint16_t g_mask = 0b0000011111100000;
@@ -341,7 +347,7 @@ inline void ssvl_convert_rgb656_to_grayscale(uint16_t *buffer, uint32_t pixel_co
 }
 
 
-inline uint16_t ssvl_disparity_search(ssvl_t *ssvl, uint16_t left_cell_x, uint16_t left_cell_y){
+SSVL_FUNC uint16_t ssvl_disparity_search(ssvl_t *ssvl, uint16_t left_cell_x, uint16_t left_cell_y){
     // Starting from the same location in the right eye as the left eye,
     // move window from right to left by a single pixel position amount
     // starting at position from left eye
@@ -376,7 +382,7 @@ inline uint16_t ssvl_disparity_search(ssvl_t *ssvl, uint16_t left_cell_x, uint16
 }
 
 
-inline void ssvl_calculate_depth(ssvl_t *ssvl){
+SSVL_FUNC void ssvl_calculate_depth(ssvl_t *ssvl){
     for(int32_t y=0; y<ssvl->depth_height; y++){
         for(int32_t x=0; x<ssvl->depth_width; x++){
 
@@ -395,7 +401,7 @@ inline void ssvl_calculate_depth(ssvl_t *ssvl){
 
 
 // Left and right camera buffers are full, process them
-inline bool ssvl_process(ssvl_t *ssvl){
+SSVL_FUNC bool ssvl_process(ssvl_t *ssvl){
     // We have both frames from both cameras, need to go through
     // and calculate disparity for each pixel block and then the
     // depth for each pixel block
@@ -407,8 +413,8 @@ inline bool ssvl_process(ssvl_t *ssvl){
     // Before relating blocks between left and right eyes, 
     // change the 3 component pixels to single component
     // linear values of intensity, grayscale
-    ssvl_convert_rgb656_to_grayscale(ssvl->frame_buffers[SSVL_LEFT_CAMERA], ssvl->pixel_count);
-    ssvl_convert_rgb656_to_grayscale(ssvl->frame_buffers[SSVL_RIGHT_CAMERA], ssvl->pixel_count);
+    ssvl_convert_rgb565_to_grayscale(ssvl->frame_buffers[SSVL_LEFT_CAMERA], ssvl->pixel_count);
+    ssvl_convert_rgb565_to_grayscale(ssvl->frame_buffers[SSVL_RIGHT_CAMERA], ssvl->pixel_count);
 
     if(ssvl->on_grayscale_cb != NULL) ssvl->on_grayscale_cb(ssvl->grayscale_opaque_ptr, SSVL_LEFT_CAMERA, ssvl->frame_buffers[SSVL_LEFT_CAMERA], ssvl->width, ssvl->height);
     if(ssvl->on_grayscale_cb != NULL) ssvl->on_grayscale_cb(ssvl->grayscale_opaque_ptr, SSVL_RIGHT_CAMERA, ssvl->frame_buffers[SSVL_RIGHT_CAMERA], ssvl->width, ssvl->height);
@@ -439,11 +445,9 @@ inline bool ssvl_process(ssvl_t *ssvl){
 //  * Fed a buffer chunk but the addition of this buffer resulted in too much data needed to complete the frame
 //    (User is expected to crop their buffers or incoming `buffer_len`s so as to understand the information they
 //     are putting into the library)
-inline bool ssvl_feed(void *ssvl_instance, ssvl_camera_side side, const uint8_t *buffer_u8, uint32_t buffer_length_u8){
-    ssvl_t *ssvl = (ssvl_t*)ssvl_instance;
-
+SSVL_FUNC bool ssvl_feed(ssvl_t *ssvl, ssvl_camera_side side, const uint8_t *buffer, uint32_t buffer_length){
     // Add the additional buffer amount to the count/amount
-    ssvl->frame_buffers_amounts[side] += buffer_length_u8;
+    ssvl->frame_buffers_amounts[side] += buffer_length;
 
     // Check, in bytes, for buffer overflow, reset and return error if true
     if(ssvl->frame_buffers_amounts[side] > ssvl->frame_buffer_size){
@@ -453,11 +457,16 @@ inline bool ssvl_feed(void *ssvl_instance, ssvl_camera_side side, const uint8_t 
     }
 
     // Do the copy to the internal frame buffer
-    memcpy(ssvl->frame_buffers[side], buffer_u8, buffer_length_u8);
+    memcpy(ssvl->frame_buffers[side], buffer, buffer_length);
     
     // Process frames if both buffers are full
     if(ssvl->frame_buffers_amounts[SSVL_LEFT_CAMERA] == ssvl->frame_buffer_size &&
        ssvl->frame_buffers_amounts[SSVL_RIGHT_CAMERA] == ssvl->frame_buffer_size){
+
+        #if defined(SSVL_DEBUG)
+            SSVL_PRINTF("PROCESSING\n");
+        #endif
+
         return ssvl_process(ssvl);
     }
 
@@ -465,8 +474,7 @@ inline bool ssvl_feed(void *ssvl_instance, ssvl_camera_side side, const uint8_t 
 }
 
 
-inline float ssvl_get_max_depth_mm(void *ssvl_instance){
-    ssvl_t *ssvl = (ssvl_t*)ssvl_instance;
+SSVL_FUNC float ssvl_get_max_depth_mm(ssvl_t *ssvl){
     return ssvl->max_depth_mm;
 }
 
